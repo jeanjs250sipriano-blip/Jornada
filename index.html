@@ -5778,12 +5778,22 @@ const FirebaseTableStore = (() => {
         if (!db) return;
         const { ref, onValue } = firebaseDb._api;
         if (!unsubscribeTablesRef) {
-          unsubscribeTablesRef = onValue(ref(db, 'tables'), (snap) => {
-            const val = snap.exists() ? snap.val() : {};
-            const tables = {};
-            TABLE_IDS.forEach((id) => { tables[id] = normalizeRemote(val[id], id); });
-            changeCbs.forEach((f) => f(tables));
-          });
+          unsubscribeTablesRef = onValue(
+            ref(db, 'tables'),
+            (snap) => {
+              const val = snap.exists() ? snap.val() : {};
+              const tables = {};
+              TABLE_IDS.forEach((id) => { tables[id] = normalizeRemote(val[id], id); });
+              changeCbs.forEach((f) => f(tables));
+            },
+            (err) => {
+              // Sem isso, uma negação de permissão (ex.: regras do
+              // Realtime Database desatualizadas) falhava em silêncio e a
+              // lista de mesas simplesmente nunca atualizava para ninguém.
+              console.error('[JORNADA] ERRO AO SINCRONIZAR (lista de mesas):', err);
+              showGalardaoToast('ERRO AO SINCRONIZAR — verifique as regras do Firebase.');
+            }
+          );
         }
       })();
       return () => { changeCbs = changeCbs.filter((f) => f !== cb); };
@@ -5880,7 +5890,14 @@ const FirebaseTableStore = (() => {
         const db = await ensureFirebase().catch(() => null);
         if (!db || cancelled) return;
         const { ref, onValue } = firebaseDb._api;
-        stopFn = onValue(ref(db, 'tables/' + tableId + '/gameState'), (snap) => cb(snap.val()));
+        stopFn = onValue(
+          ref(db, 'tables/' + tableId + '/gameState'),
+          (snap) => cb(snap.val()),
+          (err) => {
+            console.error('[JORNADA] ERRO AO SINCRONIZAR (estado da partida):', err);
+            showGalardaoToast('ERRO AO SINCRONIZAR — verifique as regras do Firebase.');
+          }
+        );
       })();
       return () => { cancelled = true; stopFn(); };
     },
