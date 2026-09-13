@@ -5905,7 +5905,23 @@ const FirebaseTableStore = (() => {
 })();
 
 // ---- Seleção do modo ativo (LOCAL por padrão; ONLINE requer Firebase) ----
-let ACTIVE_MODE = 'local';
+// CORREÇÃO: o modo escolhido agora é lembrado entre recarregamentos da
+// página (localStorage). Antes, toda vez que a página era recarregada,
+// ACTIVE_MODE voltava para 'local' silenciosamente — o que fazia parecer
+// que "as mesas sumiram", quando na verdade elas continuavam existindo
+// no Firebase, só que a tela estava mostrando a lista local (vazia).
+const MODE_STORAGE_KEY = 'jornada_activeMode_v1';
+function loadSavedMode() {
+  try {
+    const saved = localStorage.getItem(MODE_STORAGE_KEY);
+    if (saved === 'online' && FIREBASE_CONFIGURED) return 'online';
+  } catch (e) {}
+  return 'local';
+}
+function saveMode(mode) {
+  try { localStorage.setItem(MODE_STORAGE_KEY, mode); } catch (e) {}
+}
+let ACTIVE_MODE = loadSavedMode();
 function activeStore() { return ACTIVE_MODE === 'online' ? FirebaseTableStore : LocalTableStore; }
 
 function updateModeUI() {
@@ -5923,6 +5939,7 @@ document.querySelectorAll('#modeSwitch button').forEach((btn) => {
     }
     if (ACTIVE_MODE === btn.dataset.mode) return;
     ACTIVE_MODE = btn.dataset.mode;
+    saveMode(ACTIVE_MODE);
     updateModeUI();
     subscribeTables();
   });
