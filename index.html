@@ -6069,7 +6069,7 @@ btnStartJourneyEl.addEventListener('click', async () => {
   try {
     const tableId = await activeStore().createTable(password, count);
     setupScreen.classList.add('hidden');
-    enterLobbyDirectly(tableId);
+    await enterLobbyDirectly(tableId);
   } catch (e) {
     setupScreen.classList.add('hidden');
     goToTableListScreen();
@@ -6098,7 +6098,7 @@ btnConfirmJoinTableEl.addEventListener('click', async () => {
   try {
     const id = await activeStore().joinTable(pendingJoinTableId, pass);
     joinTableModal.classList.add('hidden');
-    enterLobbyDirectly(id);
+    await enterLobbyDirectly(id);
   } catch (e) {
     joinTableErrorEl.textContent = e.message || 'AÇÃO NÃO PERMITIDA';
   }
@@ -6108,13 +6108,37 @@ btnConfirmJoinTableEl.addEventListener('click', async () => {
 /* ======================================================================
    19. LOBBY DA MESA (seção 11) + INÍCIO DA PARTIDA (seções 16–17)
    ====================================================================== */
-function enterLobbyDirectly(tableId) {
+// CORREÇÃO (condição de corrida MODO ONLINE): createTable()/joinTable()
+// resolvem assim que a escrita no Firebase é confirmada, mas o listener
+// onValue() que mantém currentTablesSnapshot atualizado é assíncrono e
+// pode ainda não ter entregue essa atualização neste exato instante. Sem
+// isso, enterLobbyDirectly encontrava currentTablesSnapshot[tableId]
+// desatualizado (ou ausente) e o lobby ficava vazio/travado. A correção
+// busca a mesa UMA ÚNICA VEZ, diretamente no store ativo (list(), que já
+// existe tanto no LocalTableStore quanto no FirebaseTableStore), apenas
+// quando o snapshot local ainda não reflete a mesa recém-criada/ingressada.
+// Não é polling: é uma única leitura pontual. O listener onChange()
+// continua sendo a única fonte de atualizações contínuas depois disso.
+async function enterLobbyDirectly(tableId) {
   gameState.tableId = tableId;
   gameState.phase = 'lobby';
   hideAllTableScreens();
   tableLobbyScreen.classList.remove('hidden');
-  const t = currentTablesSnapshot[tableId];
+
+  let t = currentTablesSnapshot[tableId];
+  if (!t || t.status === 'empty') {
+    try {
+      const fresh = await activeStore().list();
+      currentTablesSnapshot = Object.assign({}, currentTablesSnapshot, fresh);
+      t = currentTablesSnapshot[tableId];
+    } catch (e) {
+      // Mantém o que já havia; se ainda faltar, renderLobby trata abaixo
+      // (mesa realmente não encontrada) e o listener onChange, quando
+      // conectar, corrige o estado normalmente.
+    }
+  }
   if (t) renderLobby(t);
+  else lobbyErrorEl.textContent = 'MESA NÃO ENCONTRADA';
 }
 
 function renderLobby(t) {
