@@ -345,21 +345,48 @@
 </div>
 
 <!-- ======================================================================
-     TELA INICIAL — LISTA DE MESAS (nova tela de entrada do JORNADA)
+     TELA INICIAL — escolha JOGAR LOCAL / JOGAR ONLINE
      ====================================================================== -->
-<div id="tableListScreen" class="overlay">
+<div id="homeScreen" class="overlay">
+  <div class="tablesTopBar">
+    <div class="iconBtnSmall" id="btnRulesFromHome" title="Regras">📜</div>
+    <div class="iconBtnSmall" id="btnSettingsFromHome" title="Configurações">⚙</div>
+  </div>
+  <div class="panel">
+    <h1>JORNADA <span>3D</span></h1>
+    <p class="sub">um caminho através das eras</p>
+    <button class="menuBtn primary" id="btnPlayLocal">JOGAR LOCAL</button>
+    <button class="menuBtn" id="btnPlayOnline">JOGAR ONLINE</button>
+  </div>
+</div>
+
+<!-- Configuração rápida do jogo LOCAL (sem mesa, senha ou lobby) -->
+<div id="localSetupScreen" class="overlay hidden">
+  <div class="panel">
+    <h2>JOGAR LOCAL</h2>
+    <p class="sub">Escolha quantos jogadores neste dispositivo (2 a 6).</p>
+    <div class="playerCountGrid" id="localPlayerCountGrid">
+      <button class="countBtn localCountBtn" data-count="2">2</button>
+      <button class="countBtn localCountBtn" data-count="3">3</button>
+      <button class="countBtn localCountBtn" data-count="4">4</button>
+      <button class="countBtn localCountBtn" data-count="5">5</button>
+      <button class="countBtn localCountBtn" data-count="6">6</button>
+    </div>
+    <button class="menuBtn primary" id="btnStartLocalJourney" disabled>INICIAR JORNADA</button>
+    <button class="menuBtn" id="btnBackFromLocalSetup">VOLTAR</button>
+  </div>
+</div>
+
+<!-- LISTA DE MESAS — somente MODO ONLINE -->
+<div id="tableListScreen" class="overlay hidden">
   <div class="tablesTopBar">
     <div class="iconBtnSmall" id="btnRulesFromTables" title="Regras">📜</div>
     <div class="iconBtnSmall" id="btnSettingsFromTables" title="Configurações">⚙</div>
   </div>
   <div class="panel tables">
     <h1>JORNADA <span>3D</span></h1>
-    <p class="sub">um caminho através das eras</p>
-    <div class="modeBadge" id="modeBadge"><i></i><span id="modeBadgeText">MODO LOCAL</span></div>
-    <div class="modeSwitch" id="modeSwitch">
-      <button data-mode="local" class="active">TESTE LOCAL</button>
-      <button data-mode="online">ONLINE</button>
-    </div>
+    <p class="sub">mesas online</p>
+    <div class="modeBadge online" id="modeBadge"><i></i><span id="modeBadgeText">MODO ONLINE</span></div>
     <button class="menuBtn primary" id="btnCreateTable">CRIAR NOVA MESA</button>
     <p class="sub" id="tableLimitNote" style="display:none;">Limite de 3 mesas atingido. Exclua uma mesa vazia para criar outra.</p>
     <h2 style="margin-top:4px;">MESAS DISPONÍVEIS</h2>
@@ -367,6 +394,7 @@
       <!-- cards de mesa renderizados dinamicamente -->
     </div>
     <p class="emptyTablesNote hidden" id="emptyTablesNote">Nenhuma mesa aberta no momento. Crie a primeira.</p>
+    <button class="menuBtn" id="btnBackFromOnlineTables">VOLTAR</button>
   </div>
 </div>
 
@@ -429,24 +457,7 @@
     <div class="lobbySlots" id="lobbySlots"></div>
     <p class="formError" id="lobbyError"></p>
     <button class="menuBtn primary" id="btnStartFromLobby">INICIAR PARTIDA</button>
-    <button class="menuBtn danger" id="btnForceDeleteTable">EXCLUIR MESA</button>
     <button class="menuBtn danger" id="btnLeaveLobby">SAIR DA MESA</button>
-  </div>
-</div>
-
-<!-- Modal: exclusão forçada da mesa por senha (teste — qualquer um com a senha) -->
-<div id="forceDeleteModal" class="overlay hidden">
-  <div class="panel">
-    <h2>EXCLUIR MESA</h2>
-    <p class="sub">Esta ação excluirá esta mesa e todos os dados associados a ela.</p>
-    <p class="sub">Digite a senha de 4 dígitos para confirmar.</p>
-    <div class="fieldRow">
-      <label for="forceDeletePassword">Senha</label>
-      <input id="forceDeletePassword" type="password" inputmode="numeric" maxlength="4" pattern="[0-9]*" autocomplete="off" placeholder="••••">
-    </div>
-    <p class="formError" id="forceDeleteError"></p>
-    <button class="menuBtn danger" id="btnConfirmForceDelete">CONFIRMAR EXCLUSÃO</button>
-    <button class="menuBtn" id="btnCancelForceDelete">CANCELAR</button>
   </div>
 </div>
 
@@ -5440,6 +5451,8 @@ const gameState = { phase: 'tables', paused: false, tableId: null };
 const el = (id) => document.getElementById(id);
 
 // Telas do sistema de mesas (novas)
+const homeScreen        = el('homeScreen');
+const localSetupScreen  = el('localSetupScreen');
 const tableListScreen   = el('tableListScreen');
 const createTableModal  = el('createTableModal');
 const joinTableModal    = el('joinTableModal');
@@ -5458,7 +5471,7 @@ const menuPanel         = el('menuPanel');
 const mainHud           = el('mainHud');
 const topRightEls       = [el('menuBtn'), el('resetViewBtn'), el('resetGameBtn')];
 
-// Elementos da lista de mesas
+// Elementos da lista de mesas (somente ONLINE)
 const tableGridEl        = el('tableGrid');
 const emptyTablesNoteEl  = el('emptyTablesNote');
 const tableLimitNoteEl   = el('tableLimitNote');
@@ -5467,6 +5480,14 @@ const modeBadgeEl        = el('modeBadge');
 const modeBadgeTextEl    = el('modeBadgeText');
 const btnRulesFromTablesEl    = el('btnRulesFromTables');
 const btnSettingsFromTablesEl = el('btnSettingsFromTables');
+const btnBackFromOnlineTablesEl = el('btnBackFromOnlineTables');
+const btnPlayLocalEl     = el('btnPlayLocal');
+const btnPlayOnlineEl    = el('btnPlayOnline');
+const btnStartLocalJourneyEl = el('btnStartLocalJourney');
+const btnBackFromLocalSetupEl = el('btnBackFromLocalSetup');
+const btnRulesFromHomeEl = el('btnRulesFromHome');
+const btnSettingsFromHomeEl = el('btnSettingsFromHome');
+let selectedLocalPlayerCount = null;
 
 // Elementos do modal "criar mesa"
 const createPasswordEl        = el('createPassword');
@@ -5492,13 +5513,7 @@ const lobbyCountTextEl   = el('lobbyCountText');
 const lobbySlotsEl       = el('lobbySlots');
 const lobbyErrorEl       = el('lobbyError');
 const btnStartFromLobbyEl = el('btnStartFromLobby');
-const btnForceDeleteTableEl = el('btnForceDeleteTable');
 const btnLeaveLobbyEl     = el('btnLeaveLobby');
-const forceDeleteModal    = el('forceDeleteModal');
-const forceDeletePasswordEl = el('forceDeletePassword');
-const forceDeleteErrorEl  = el('forceDeleteError');
-const btnConfirmForceDeleteEl = el('btnConfirmForceDelete');
-const btnCancelForceDeleteEl  = el('btnCancelForceDelete');
 
 let selectedPlayerCount = null;
 let settingsReturnTo = null; // para onde voltar ao fechar CONFIGURAÇÕES
@@ -5510,12 +5525,13 @@ function showGameChrome(show) {
 }
 
 function hideAllTableScreens() {
+  if (homeScreen) homeScreen.classList.add('hidden');
+  if (localSetupScreen) localSetupScreen.classList.add('hidden');
   tableListScreen.classList.add('hidden');
   createTableModal.classList.add('hidden');
   joinTableModal.classList.add('hidden');
   setupScreen.classList.add('hidden');
   tableLobbyScreen.classList.add('hidden');
-  if (forceDeleteModal) forceDeleteModal.classList.add('hidden');
 }
 
 
@@ -5722,18 +5738,10 @@ const LocalTableStore = (() => {
       writeAll(tables);
       return tableId;
     },
-    async deleteTable(tableId, password) {
+    async deleteTable(tableId) {
       const tables = readAll();
       const t = tables[tableId];
-      if (!t || t.status === 'empty') throw new Error('MESA NÃO ENCONTRADA');
-      // Com senha: exclusão forçada (lobby). Sem senha: só mesa vazia (lista).
-      if (password !== undefined && password !== null && password !== '') {
-        if (String(password) !== String(t.password)) throw new Error('SENHA INCORRETA');
-        tables[tableId] = emptyTable(tableId);
-        writeAll(tables);
-        return;
-      }
-      if (Object.keys(t.players || {}).length > 0) throw new Error('AÇÃO NÃO PERMITIDA');
+      if (!t || Object.keys(t.players).length > 0) throw new Error('AÇÃO NÃO PERMITIDA');
       tables[tableId] = emptyTable(tableId);
       writeAll(tables);
     },
@@ -5902,32 +5910,15 @@ const FirebaseTableStore = (() => {
       if (errorMsg) throw new Error(errorMsg);
       return tableId;
     },
-    async deleteTable(tableId, password) {
+    async deleteTable(tableId) {
       const db = await apiOrThrow();
       const { ref, runTransaction } = firebaseDb._api;
-      let errorMsg = null;
-      // Com senha: exclusão forçada (lobby) — remove o nó inteiro se a senha bater.
-      // Sem senha: só mesa vazia (lista externa), comportamento anterior.
+      // Também protegido por transação: evita que a mesa seja excluída
+      // bem no instante em que outro cliente está entrando nela.
       const result = await runTransaction(ref(db, 'tables/' + tableId), (t) => {
-        if (t === null || !t.status || t.status === 'empty') {
-          errorMsg = 'MESA NÃO ENCONTRADA';
-          return t;
-        }
-        if (password !== undefined && password !== null && password !== '') {
-          if (String(password) !== String(t.password)) {
-            errorMsg = 'SENHA INCORRETA';
-            return t; // não altera
-          }
-          return null; // remove atomicamente (mesmo com jogadores / playing)
-        }
-        const filled = Object.keys(normalizePlayers(t.players)).length;
-        if (filled > 0) {
-          errorMsg = 'AÇÃO NÃO PERMITIDA';
-          return; // aborta: mesa não está vazia
-        }
-        return null;
+        if (t && Object.keys(normalizePlayers(t.players)).length > 0) return; // aborta: mesa não está mais vazia
+        return null; // remove atomicamente
       });
-      if (errorMsg) throw new Error(errorMsg);
       if (!result.committed) throw new Error('AÇÃO NÃO PERMITIDA');
     },
     async leaveTable(tableId) {
@@ -6008,26 +5999,14 @@ let ACTIVE_MODE = loadSavedMode();
 function activeStore() { return ACTIVE_MODE === 'online' ? FirebaseTableStore : LocalTableStore; }
 
 function updateModeUI() {
-  document.querySelectorAll('#modeSwitch button').forEach((b) => {
-    b.classList.toggle('active', b.dataset.mode === ACTIVE_MODE);
-  });
-  modeBadgeEl.className = 'modeBadge ' + ACTIVE_MODE;
-  modeBadgeTextEl.textContent = ACTIVE_MODE === 'online' ? 'MODO ONLINE' : 'MODO TESTE LOCAL';
+  // Badge só existe na lista ONLINE; local não usa switch de mesas.
+  if (modeBadgeEl) {
+    modeBadgeEl.className = 'modeBadge ' + (ACTIVE_MODE === 'online' ? 'online' : 'local');
+  }
+  if (modeBadgeTextEl) {
+    modeBadgeTextEl.textContent = ACTIVE_MODE === 'online' ? 'MODO ONLINE' : 'MODO LOCAL';
+  }
 }
-document.querySelectorAll('#modeSwitch button').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    if (btn.dataset.mode === 'online' && !FIREBASE_CONFIGURED) {
-      showGalardaoToast('Configure o Firebase (ver LEIA-ME) para habilitar o modo online.');
-      return;
-    }
-    if (ACTIVE_MODE === btn.dataset.mode) return;
-    ACTIVE_MODE = btn.dataset.mode;
-    saveMode(ACTIVE_MODE);
-    updateModeUI();
-    subscribeTables();
-  });
-});
-document.querySelector('#modeSwitch button[data-mode="online"]').disabled = !FIREBASE_CONFIGURED;
 updateModeUI();
 
 
@@ -6042,20 +6021,7 @@ function subscribeTables() {
   unsubscribeTables = activeStore().onChange((tables) => {
     currentTablesSnapshot = tables;
     if (gameState.phase === 'tables') renderTableList(tables);
-    // Mesa removida enquanto estamos no lobby ou em partida → volta à lista
-    if ((gameState.phase === 'lobby' || gameState.phase === 'playing') && gameState.tableId) {
-      const t = tables[gameState.tableId];
-      if (!t || t.status === 'empty') {
-        if (unsubscribeGameState) { try { unsubscribeGameState(); } catch (_) {} unsubscribeGameState = null; }
-        MULTIPLAYER_ONLINE = false;
-        MY_TURN_SLOT = null;
-        gameState.tableId = null;
-        showGalardaoToast('MESA EXCLUÍDA');
-        goToTableListScreen();
-        return;
-      }
-      if (gameState.phase === 'lobby') renderLobby(t);
-    }
+    if (gameState.phase === 'lobby' && gameState.tableId) renderLobby(tables[gameState.tableId]);
   });
 }
 
@@ -6127,31 +6093,20 @@ function buildTableCard(id, t) {
   } else if (!isFull) {
     actions.appendChild(makeSmallBtn('ENTRAR', () => openJoinModal(id, t)));
   }
-  // Exclusão por senha disponível em TODAS as mesas existentes (mesmo lotadas).
-  // Ferramenta de teste para limpar mesas fantasmas sem precisar ser Host.
-  actions.appendChild(makeSmallBtn('EXCLUIR MESA', () => openForceDeleteModal(id), true));
+  if (filled === 0) {
+    actions.appendChild(makeSmallBtn('EXCLUIR MESA', () => deleteTableFlow(id), true));
+  }
   if (actions.children.length) card.appendChild(actions);
 
   return card;
 }
 
 async function deleteTableFlow(id) {
-  // Mantido para compatibilidade: exclusão sem senha só se a mesa estiver vazia.
   try {
     await activeStore().deleteTable(id);
   } catch (e) {
     showGalardaoToast(e.message || 'AÇÃO NÃO PERMITIDA');
   }
-}
-
-/** Abre o modal de exclusão forçada (senha) para a mesa indicada. */
-let pendingForceDeleteTableId = null;
-function openForceDeleteModal(tableId) {
-  pendingForceDeleteTableId = tableId || gameState.tableId || null;
-  if (!pendingForceDeleteTableId) return;
-  forceDeletePasswordEl.value = '';
-  forceDeleteErrorEl.textContent = '';
-  forceDeleteModal.classList.remove('hidden');
 }
 
 
@@ -6316,39 +6271,6 @@ btnLeaveLobbyEl.addEventListener('click', async () => {
   gameState.tableId = null;
   try { await activeStore().leaveTable(id); } catch (e) {}
   goToTableListScreen();
-});
-
-// Exclusão forçada por senha — lista de mesas E lobby (ferramenta de teste)
-btnForceDeleteTableEl.addEventListener('click', () => openForceDeleteModal(gameState.tableId));
-btnCancelForceDeleteEl.addEventListener('click', () => {
-  forceDeleteModal.classList.add('hidden');
-  forceDeleteErrorEl.textContent = '';
-  pendingForceDeleteTableId = null;
-});
-forceDeletePasswordEl.addEventListener('input', () => {
-  forceDeletePasswordEl.value = forceDeletePasswordEl.value.replace(/\D/g, '').slice(0, 4);
-});
-btnConfirmForceDeleteEl.addEventListener('click', async () => {
-  const pass = (forceDeletePasswordEl.value || '').trim();
-  if (!/^\d{4}$/.test(pass)) {
-    forceDeleteErrorEl.textContent = 'A senha deve ter exatamente 4 números.';
-    return;
-  }
-  const id = pendingForceDeleteTableId || gameState.tableId;
-  if (!id) return;
-  try {
-    await activeStore().deleteTable(id, pass);
-    forceDeleteModal.classList.add('hidden');
-    pendingForceDeleteTableId = null;
-    if (unsubscribeGameState) { try { unsubscribeGameState(); } catch (_) {} unsubscribeGameState = null; }
-    MULTIPLAYER_ONLINE = false;
-    MY_TURN_SLOT = null;
-    if (gameState.tableId === id) gameState.tableId = null;
-    showGalardaoToast('MESA EXCLUÍDA');
-    goToTableListScreen();
-  } catch (e) {
-    forceDeleteErrorEl.textContent = (e && e.message) ? e.message : 'SENHA INCORRETA';
-  }
 });
 
 btnStartFromLobbyEl.addEventListener('click', async () => {
@@ -6565,7 +6487,27 @@ function enterBoardFromTable(t) {
 /* ======================================================================
    21. TELA INICIAL (agora: LISTA DE MESAS) e telas gerais
    ====================================================================== */
+/** Tela inicial: JOGAR LOCAL / JOGAR ONLINE (sem lista de mesas). */
+function goToHomeScreen() {
+  gameState.phase = 'home';
+  gameState.paused = false;
+  gameState.tableId = null;
+  MULTIPLAYER_ONLINE = false;
+  MY_TURN_SLOT = null;
+  if (unsubscribeGameState) { unsubscribeGameState(); unsubscribeGameState = null; }
+  if (unsubscribeTables) { unsubscribeTables(); unsubscribeTables = null; }
+  hideAllTableScreens();
+  homeScreen.classList.remove('hidden');
+  pauseScreen.classList.add('hidden');
+  menuPanel.classList.add('hidden');
+  showGameChrome(false);
+}
+
+/** Lista de mesas — somente fluxo ONLINE. */
 function goToTableListScreen() {
+  ACTIVE_MODE = 'online';
+  saveMode('online');
+  updateModeUI();
   gameState.phase = 'tables';
   gameState.paused = false;
   gameState.tableId = null;
@@ -6577,8 +6519,57 @@ function goToTableListScreen() {
   pauseScreen.classList.add('hidden');
   menuPanel.classList.add('hidden');
   showGameChrome(false);
+  subscribeTables();
   renderTableList(currentTablesSnapshot);
 }
+
+/** Inicia partida LOCAL direta (sem mesa, senha, lobby ou Firebase). */
+function startLocalMatch(count) {
+  ACTIVE_MODE = 'local';
+  saveMode('local');
+  updateModeUI();
+  MULTIPLAYER_ONLINE = false;
+  gameState.tableId = null;
+  MY_TURN_SLOT = null;
+  if (unsubscribeGameState) { unsubscribeGameState(); unsubscribeGameState = null; }
+  if (unsubscribeTables) { unsubscribeTables(); unsubscribeTables = null; }
+  startMatch(count);
+}
+
+// ---- Home: JOGAR LOCAL / JOGAR ONLINE ----
+btnPlayLocalEl.addEventListener('click', () => {
+  selectedLocalPlayerCount = null;
+  document.querySelectorAll('.localCountBtn').forEach((b) => b.classList.remove('selected'));
+  btnStartLocalJourneyEl.disabled = true;
+  hideAllTableScreens();
+  localSetupScreen.classList.remove('hidden');
+  gameState.phase = 'local_setup';
+});
+btnPlayOnlineEl.addEventListener('click', () => {
+  if (!FIREBASE_CONFIGURED) {
+    showGalardaoToast('Configure o Firebase (ver LEIA-ME) para habilitar o modo online.');
+    return;
+  }
+  goToTableListScreen();
+});
+document.querySelectorAll('.localCountBtn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    selectedLocalPlayerCount = parseInt(btn.dataset.count, 10);
+    document.querySelectorAll('.localCountBtn').forEach((b) => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    btnStartLocalJourneyEl.disabled = false;
+  });
+});
+btnStartLocalJourneyEl.addEventListener('click', () => {
+  if (!selectedLocalPlayerCount) return;
+  startLocalMatch(selectedLocalPlayerCount);
+});
+btnBackFromLocalSetupEl.addEventListener('click', () => goToHomeScreen());
+if (btnBackFromOnlineTablesEl) {
+  btnBackFromOnlineTablesEl.addEventListener('click', () => goToHomeScreen());
+}
+if (btnRulesFromHomeEl) btnRulesFromHomeEl.addEventListener('click', () => rulesScreen.classList.remove('hidden'));
+if (btnSettingsFromHomeEl) btnSettingsFromHomeEl.addEventListener('click', () => openSettings('home'));
 
 btnRulesFromTablesEl.addEventListener('click', () => rulesScreen.classList.remove('hidden'));
 btnSettingsFromTablesEl.addEventListener('click', () => openSettings('tables'));
@@ -6638,7 +6629,7 @@ async function endMatch() {
   if (unsubscribeGameState) { unsubscribeGameState(); unsubscribeGameState = null; }
   MULTIPLAYER_ONLINE = false;
 
-  if (tableId) {
+  if (tableId && ACTIVE_MODE === 'online') {
     try { await activeStore().setStatus(tableId, 'lobby'); } catch (e) {}
     gameState.phase = 'lobby';
     hideAllTableScreens();
@@ -6647,14 +6638,14 @@ async function endMatch() {
     const snap = currentTablesSnapshot[tableId];
     if (snap) renderLobby(snap);
   } else {
-    goToTableListScreen();
+    // LOCAL (ou sem mesa): volta à seleção Local/Online — não à lista de mesas
+    goToHomeScreen();
   }
 }
 
-// Estado inicial ao carregar a página: assina a lista de mesas e mostra
-// a tela inicial (LISTA DE MESAS), conforme a nova arquitetura.
-subscribeTables();
-goToTableListScreen();
+// Estado inicial: tela home (JOGAR LOCAL / JOGAR ONLINE). Firebase/mesas
+// só são usados ao escolher JOGAR ONLINE.
+goToHomeScreen();
 
 
 /* ======================================================================
