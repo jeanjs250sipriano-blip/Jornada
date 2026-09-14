@@ -5912,12 +5912,20 @@ const FirebaseTableStore = (() => {
       let stopFn = () => {};
       let cancelled = false;
       (async () => {
-        const db = await ensureFirebase().catch(() => null);
-        if (!db || cancelled) return;
+        const db = await ensureFirebase().catch((e) => {
+          console.error('[JORNADA][SYNC] ensureFirebase() falhou ao tentar escutar gameState:', e);
+          return null;
+        });
+        if (!db) { console.warn('[JORNADA][SYNC] onGameStateChange abortado: Firebase não ficou pronto (db nulo).'); return; }
+        if (cancelled) return;
         const { ref, onValue } = firebaseDb._api;
+        console.info('[JORNADA][SYNC] anexando listener onValue em tables/' + tableId + '/gameState');
         stopFn = onValue(
           ref(db, 'tables/' + tableId + '/gameState'),
-          (snap) => cb(snap.val()),
+          (snap) => {
+            console.info('[JORNADA][SYNC] onValue disparou para gameState de', tableId, '| existe dado?', snap.exists());
+            cb(snap.val());
+          },
           (err) => {
             console.error('[JORNADA] ERRO AO SINCRONIZAR (estado da partida):', err);
             showGalardaoToast('ERRO AO SINCRONIZAR — verifique as regras do Firebase.');
@@ -6317,8 +6325,14 @@ function broadcastSharedState() {
   if (!MULTIPLAYER_ONLINE || applyingRemoteState || !gameState.tableId) return;
   clearTimeout(broadcastTimer);
   broadcastTimer = setTimeout(() => {
-    activeStore().updateGameState(gameState.tableId, serializeSharedState())
-      .catch((err) => { console.error('[JORNADA] ERRO AO SINCRONIZAR', err); showGalardaoToast('ERRO AO SINCRONIZAR'); });
+    const payload = serializeSharedState();
+    console.info('[JORNADA][SYNC] enviando estado ->', payload.currentPlayerIdx, payload);
+    activeStore().updateGameState(gameState.tableId, payload)
+      .then(() => console.info('[JORNADA][SYNC] escrita confirmada no Firebase, currentPlayerIdx=', payload.currentPlayerIdx))
+      .catch((err) => {
+        console.error('[JORNADA] ERRO AO SINCRONIZAR', err);
+        showGalardaoToast('ERRO AO SINCRONIZAR');
+      });
   }, 150);
 }
 
@@ -6326,7 +6340,15 @@ function broadcastSharedState() {
 // motor local. Nunca mexe em câmera/animações/renderização — apenas nos
 // dados que representam a partida.
 function applyRemoteSharedState(remote) {
-  if (!remote || remote.updatedBy === CLIENT_ID) return;
+  console.info('[JORNADA][SYNC] estado remoto recebido', remote);
+  if (!remote || remote.updatedBy === CLIENT_ID) {
+    console.info('[JORNADA][SYNC] ignorado (vazio ou eco do próprio dispositivo)');
+    return;
+  }
+  if (!Array.isArray(remote.players)) {
+    console.warn('[JORNADA][SYNC] estado remoto sem players[] válido — ignorado', remote);
+    return;
+  }
   applyingRemoteState = true;
   try {
     currentPlayerIdx = remote.currentPlayerIdx;
@@ -6355,6 +6377,7 @@ function applyRemoteSharedState(remote) {
     });
     updatePlayerHud();
     if (GAME_CORE.winner !== null) rollBtn.disabled = true;
+    console.info('[JORNADA][SYNC] estado aplicado. currentPlayerIdx agora =', currentPlayerIdx, '| isMyTurn() =', isMyTurn(), '| MY_TURN_SLOT =', MY_TURN_SLOT);
   } finally {
     applyingRemoteState = false;
   }
@@ -6385,10 +6408,20 @@ function enterBoardFromTable(t) {
   MULTIPLAYER_ONLINE = (ACTIVE_MODE === 'online');
   const mySlot = Object.keys(t.players).find((s) => t.players[s].clientId === CLIENT_ID);
   MY_TURN_SLOT = mySlot || null;
+  // DIAGNÓSTICO (temporário, não altera comportamento): mostra no
+  // console exatamente qual slot este dispositivo pensa que é o seu.
+  console.info('[JORNADA][SYNC] entrei na mesa', {
+    tableId: gameState.tableId,
+    CLIENT_ID,
+    players: t.players,
+    MY_TURN_SLOT,
+    MULTIPLAYER_ONLINE,
+  });
 
   if (unsubscribeGameState) { unsubscribeGameState(); unsubscribeGameState = null; }
   if (MULTIPLAYER_ONLINE) {
     unsubscribeGameState = activeStore().onGameStateChange(gameState.tableId, applyRemoteSharedState);
+    console.info('[JORNADA][SYNC] listener de gameState conectado para a mesa', gameState.tableId);
   }
 
   // Reaproveita 100% o motor e o tabuleiro 3D já existentes — nenhuma
