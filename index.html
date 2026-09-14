@@ -6280,6 +6280,28 @@ let unsubscribeGameState = null;
 let applyingRemoteState = false;
 let broadcastTimer = null;
 
+// CORREÇÃO (bug do turno travado): o Firebase Realtime Database recusa
+// TOTALMENTE qualquer escrita que contenha `undefined` em qualquer campo,
+// em qualquer profundidade — e aborta a escrita inteira, não só o campo
+// problemático. Isso é o que estava travando o turno: dado antigo em
+// `tables/$id/gameState` (de sessões de teste anteriores, escrito antes
+// de algum campo existir) fazia `GAME_CORE.winner` ou outro campo virar
+// `undefined` ao ser copiado de um estado remoto incompleto, e a partir
+// daí TODA escrita seguinte falhava silenciosamente (ou com o erro
+// "set failed: value argument contains undefined..."), travando o jogo
+// para os dois lados. Esta função sanitiza qualquer valor antes de
+// enviar ao Firebase, convertendo `undefined` em `null` recursivamente.
+function sanitizeForFirebase(value) {
+  if (value === undefined) return null;
+  if (Array.isArray(value)) return value.map(sanitizeForFirebase);
+  if (value && typeof value === 'object') {
+    const out = {};
+    Object.keys(value).forEach((k) => { out[k] = sanitizeForFirebase(value[k]); });
+    return out;
+  }
+  return value;
+}
+
 function isMyTurn() {
   if (!MULTIPLAYER_ONLINE) return true; // modo local: qualquer clique é válido (um dispositivo controla todos)
   if (!MY_TURN_SLOT) return false; // espectador — não deveria acontecer, mas por segurança nega a ação
@@ -6326,7 +6348,7 @@ function broadcastSharedState() {
   if (!MULTIPLAYER_ONLINE || applyingRemoteState || !gameState.tableId) return;
   clearTimeout(broadcastTimer);
   broadcastTimer = setTimeout(() => {
-    const payload = serializeSharedState();
+    const payload = sanitizeForFirebase(serializeSharedState());
     console.info('[JORNADA][SYNC] enviando estado ->', payload.currentPlayerIdx, payload);
     activeStore().updateGameState(gameState.tableId, payload)
       .then(() => console.info('[JORNADA][SYNC] escrita confirmada no Firebase, currentPlayerIdx=', payload.currentPlayerIdx))
@@ -6352,8 +6374,11 @@ function applyRemoteSharedState(remote) {
   }
   applyingRemoteState = true;
   try {
-    currentPlayerIdx = remote.currentPlayerIdx;
-    GAME_CORE.winner = remote.winner;
+    if (typeof remote.currentPlayerIdx === 'number') currentPlayerIdx = remote.currentPlayerIdx;
+    // Nunca copia `undefined` para o estado local (pode vir de dado
+    // antigo/incompleto gravado antes deste campo existir) — sempre um
+    // valor válido (null quando não há vencedor).
+    GAME_CORE.winner = (remote.winner === undefined) ? null : remote.winner;
     // Mostra o resultado REAL recebido (texto), sem reproduzir a
     // animação de rolagem — a animação é exclusivamente local e só
     // acontece no dispositivo de quem realmente lançou os dados.
