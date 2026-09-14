@@ -194,6 +194,7 @@
     background:var(--panel-bg); border:1px solid var(--panel-border); color:var(--gold);
     padding:8px 18px; border-radius:10px; font-weight:600; font-size:0.92rem;
     opacity:0; transition: opacity 0.35s ease, transform 0.35s ease; pointer-events:none;
+    max-width:88vw; text-align:center; word-break:break-word;
   }
   #galardaoToast.show{ opacity:1; transform:translateX(-50%) translateY(6px); }
 
@@ -4956,11 +4957,11 @@ function updatePlayersPanel() {
   if (typeof broadcastSharedState === 'function') broadcastSharedState();
 }
 
-function showGalardaoToast(text) {
+function showGalardaoToast(text, durationMs) {
   galardaoToastEl.textContent = text;
   galardaoToastEl.classList.add('show');
   clearTimeout(showGalardaoToast._t);
-  showGalardaoToast._t = setTimeout(() => galardaoToastEl.classList.remove('show'), 1800);
+  showGalardaoToast._t = setTimeout(() => galardaoToastEl.classList.remove('show'), durationMs || 1800);
 }
 
 function nextActivePlayer() {
@@ -5812,7 +5813,7 @@ const FirebaseTableStore = (() => {
               // Realtime Database desatualizadas) falhava em silêncio e a
               // lista de mesas simplesmente nunca atualizava para ninguém.
               console.error('[JORNADA] ERRO AO SINCRONIZAR (lista de mesas):', err);
-              showGalardaoToast('ERRO AO SINCRONIZAR — verifique as regras do Firebase.');
+              showGalardaoToast('ERRO AO SINCRONIZAR (lista): ' + (err && (err.code || err.message) || 'erro desconhecido'), 6000);
             }
           );
         }
@@ -5928,7 +5929,7 @@ const FirebaseTableStore = (() => {
           },
           (err) => {
             console.error('[JORNADA] ERRO AO SINCRONIZAR (estado da partida):', err);
-            showGalardaoToast('ERRO AO SINCRONIZAR — verifique as regras do Firebase.');
+            showGalardaoToast('ERRO AO SINCRONIZAR (partida): ' + (err && (err.code || err.message) || 'erro desconhecido'), 6000);
           }
         );
       })();
@@ -6330,8 +6331,8 @@ function broadcastSharedState() {
     activeStore().updateGameState(gameState.tableId, payload)
       .then(() => console.info('[JORNADA][SYNC] escrita confirmada no Firebase, currentPlayerIdx=', payload.currentPlayerIdx))
       .catch((err) => {
-        console.error('[JORNADA] ERRO AO SINCRONIZAR', err);
-        showGalardaoToast('ERRO AO SINCRONIZAR');
+        console.error('[JORNADA] ERRO AO SINCRONIZAR (escrita)', err);
+        showGalardaoToast('ERRO AO SINCRONIZAR (escrita): ' + (err && (err.code || err.message) || 'erro desconhecido'), 6000);
       });
   }, 150);
 }
