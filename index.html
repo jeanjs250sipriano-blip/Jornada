@@ -5753,8 +5753,29 @@ const FirebaseTableStore = (() => {
     if (!db) throw new Error('CONEXÃO PERDIDA');
     return db;
   }
+  // CORREÇÃO (bug do turno travado em partidas online): quando um objeto
+  // só tem chaves numéricas — é exatamente o caso de "players": {"1":...,
+  // "2":...} — o Firebase Realtime Database pode devolvê-lo como ARRAY ao
+  // ler de volta, criando uma posição fantasma "null" no índice 0 (já que
+  // nossos slots começam em 1, não em 0). Isso é um comportamento
+  // documentado do próprio Realtime Database, não um bug do JORNADA — mas
+  // quebrava o cálculo de "qual é o meu slot" (Object.keys(t.players)
+  // encontrava esse "null" e travava com erro ao ler .clientId dele),
+  // impedindo o controle de turno de funcionar corretamente para quem não
+  // é o Host. Esta função sempre reconstrói um objeto limpo, descartando
+  // qualquer entrada vazia/nula, não importa o formato que o Firebase
+  // devolveu.
+  function normalizePlayers(rawPlayers) {
+    const clean = {};
+    if (!rawPlayers) return clean;
+    Object.keys(rawPlayers).forEach((key) => {
+      const entry = rawPlayers[key];
+      if (entry && typeof entry === 'object' && entry.clientId) clean[key] = entry;
+    });
+    return clean;
+  }
   function normalizeRemote(raw, id) {
-    return Object.assign(emptyTable(id), raw || {}, { players: (raw && raw.players) || {} });
+    return Object.assign(emptyTable(id), raw || {}, { players: normalizePlayers(raw && raw.players) });
   }
   async function snapshotAllTables(db) {
     const { ref, get } = firebaseDb._api;
@@ -5832,7 +5853,10 @@ const FirebaseTableStore = (() => {
       await runTransaction(ref(db, 'tables/' + tableId), (t) => {
         if (t === null || !t.status || t.status === 'empty') { errorMsg = 'MESA NÃO ENCONTRADA'; return t; }
         if (t.password !== password) { errorMsg = 'SENHA INCORRETA'; return t; }
-        const playersMap = t.players || {};
+        // Normaliza antes de usar Object.keys/Object.values (ver
+        // normalizePlayers acima) — sem isso, uma mesa que o Firebase
+        // devolveu como array quebrava aqui.
+        const playersMap = normalizePlayers(t.players);
         const already = Object.values(playersMap).some((p) => p.clientId === CLIENT_ID);
         if (already) return t;
         const filled = Object.keys(playersMap).length;
@@ -5851,7 +5875,7 @@ const FirebaseTableStore = (() => {
       // Também protegido por transação: evita que a mesa seja excluída
       // bem no instante em que outro cliente está entrando nela.
       const result = await runTransaction(ref(db, 'tables/' + tableId), (t) => {
-        if (t && t.players && Object.keys(t.players).length > 0) return; // aborta: mesa não está mais vazia
+        if (t && Object.keys(normalizePlayers(t.players)).length > 0) return; // aborta: mesa não está mais vazia
         return null; // remove atomicamente
       });
       if (!result.committed) throw new Error('AÇÃO NÃO PERMITIDA');
@@ -5861,7 +5885,8 @@ const FirebaseTableStore = (() => {
       const { ref, runTransaction } = firebaseDb._api;
       await runTransaction(ref(db, 'tables/' + tableId), (t) => {
         if (!t) return t;
-        const playersMap = t.players || {};
+        // Mesma normalização (ver comentário acima em normalizePlayers).
+        const playersMap = normalizePlayers(t.players);
         const slot = Object.keys(playersMap).find((s) => playersMap[s].clientId === CLIENT_ID);
         if (slot) delete playersMap[slot];
         if (Object.keys(playersMap).length === 0) return null; // mesa volta a ficar vazia
