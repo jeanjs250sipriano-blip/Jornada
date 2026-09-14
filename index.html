@@ -5114,6 +5114,9 @@ function checkVictory() {
     GAME_CORE.winner = winner.id;
     logEvent(`${winner.name} venceu a Jornada — PROCLAMADOR DO JUBILEU.`);
     rollBtn.disabled = true;
+    if (typeof broadcastGameEvent === 'function') {
+      broadcastGameEvent(makeGameEvent('GAME_OVER', { winnerId: winner.id, playerIndex: winner.id }));
+    }
     showEventModal('JUBILEU', `${winner.name} é o último jogador economicamente ativo e vence a Jornada! Título: PROCLAMADOR DO JUBILEU.`, () => {});
     return true;
   }
@@ -5135,6 +5138,11 @@ function buyProperty(player, id) {
   player.properties.push(id);
   showGalardaoToast(`${player.name} comprou ${boardSpaces[id].name}`);
   updatePlayersPanel();
+  if (typeof broadcastGameEvent === 'function') {
+    broadcastGameEvent(makeGameEvent('PROPERTY_PURCHASED', {
+      playerIndex: player.id, spaceId: id, price: price, galardoes: player.galardoes,
+    }));
+  }
   return true;
 }
 function buildCostFor(id) { return GAME_RULES.constructionBaseCost[boardSpaces[id].group]; }
@@ -5149,6 +5157,11 @@ function buildOnProperty(player, id) {
   transferGalardoes(player, null, cost, `Construção em ${boardSpaces[id].name}`);
   propertyState[id].level += 1;
   showGalardaoToast(`Construção em ${boardSpaces[id].name} (nível ${propertyState[id].level})`);
+  if (typeof broadcastGameEvent === 'function') {
+    broadcastGameEvent(makeGameEvent('PROPERTY_BUILT', {
+      playerIndex: player.id, spaceId: id, level: propertyState[id].level, galardoes: player.galardoes,
+    }));
+  }
   return true;
 }
 function sellBuilding(player, id) {
@@ -5158,6 +5171,11 @@ function sellBuilding(player, id) {
   st.level -= 1;
   transferGalardoes(null, player, refund, `Venda de construção em ${boardSpaces[id].name}`);
   showGalardaoToast(`Construção vendida em ${boardSpaces[id].name} (+${refund} G)`);
+  if (typeof broadcastGameEvent === 'function') {
+    broadcastGameEvent(makeGameEvent('PROPERTY_SOLD', {
+      playerIndex: player.id, spaceId: id, level: st.level, galardoes: player.galardoes,
+    }));
+  }
   return true;
 }
 function mortgageProperty(player, id, silent) {
@@ -5167,6 +5185,11 @@ function mortgageProperty(player, id, silent) {
   st.mortgaged = true;
   transferGalardoes(null, player, value, `Hipoteca de ${boardSpaces[id].name}`);
   if (!silent) showGalardaoToast(`${boardSpaces[id].name} hipotecada (+${value} G)`);
+  if (typeof broadcastGameEvent === 'function') {
+    broadcastGameEvent(makeGameEvent('PROPERTY_MORTGAGED', {
+      playerIndex: player.id, spaceId: id, galardoes: player.galardoes,
+    }));
+  }
   return true;
 }
 function redeemMortgage(player, id) {
@@ -5178,6 +5201,11 @@ function redeemMortgage(player, id) {
   transferGalardoes(player, null, cost, `Resgate de hipoteca de ${boardSpaces[id].name}`);
   st.mortgaged = false;
   showGalardaoToast(`Hipoteca de ${boardSpaces[id].name} resgatada`);
+  if (typeof broadcastGameEvent === 'function') {
+    broadcastGameEvent(makeGameEvent('PROPERTY_REDEEMED', {
+      playerIndex: player.id, spaceId: id, galardoes: player.galardoes,
+    }));
+  }
   return true;
 }
 
@@ -5194,6 +5222,13 @@ function sendToCativeiro(player) {
   player.cativeiroTurns = GAME_RULES.cativeiroTurnsToSkip;
   positionSinglePawn(player);
   logEvent(`${player.name} foi enviado ao Cativeiro.`);
+  if (typeof broadcastGameEvent === 'function') {
+    broadcastGameEvent(makeGameEvent('CATIVEIRO', {
+      playerIndex: player.id,
+      spaceId: player.currentSpace,
+      cativeiroTurns: player.cativeiroTurns,
+    }));
+  }
 }
 
 /* ---- Painel de ações para propriedade própria (construir/vender/
@@ -5230,7 +5265,14 @@ function resolveSpace(player, done) {
         if (player.galardoes >= price) {
           showActionPanel(`${s.name} — ${price} G para comprar.`, [
             { label: `Comprar (${price} G)`, onClick: () => { buyProperty(player, player.currentSpace); hideActionPanel(); done(); } },
-            { label: 'Não comprar', onClick: () => { hideActionPanel(); done(); } }
+            { label: 'Não comprar', onClick: () => {
+              if (typeof broadcastGameEvent === 'function') {
+                broadcastGameEvent(makeGameEvent('PROPERTY_DECLINED', {
+                  playerIndex: player.id, spaceId: player.currentSpace,
+                }));
+              }
+              hideActionPanel(); done();
+            } }
           ]);
         } else {
           showGalardaoToast(`${s.name}: Galardões insuficientes para comprar.`);
@@ -5247,6 +5289,16 @@ function resolveSpace(player, done) {
           const rent = getRent(player.currentSpace);
           payObligation(player, rent, `Aluguel de ${s.name}`, owner);
           showGalardaoToast(`${player.name} pagou ${rent} G de aluguel a ${owner.name}`);
+          if (typeof broadcastGameEvent === 'function') {
+            broadcastGameEvent(makeGameEvent('RENT_PAID', {
+              playerIndex: player.id,
+              ownerIndex: owner.id,
+              spaceId: player.currentSpace,
+              amount: rent,
+              payerGalardoes: player.galardoes,
+              ownerGalardoes: owner.galardoes,
+            }));
+          }
           done();
         }
       }
@@ -5360,6 +5412,11 @@ rollBtn.addEventListener('click', () => {
     // para o Firebase.
     lastDiceRoll = { dice1Value: v1, dice2Value: v2, diceTotal: total };
     diceResultEl.innerHTML = `${v1} + ${v2} = <b>${total}</b>${isDouble ? ' (dados iguais)' : ''}`;
+    if (typeof broadcastGameEvent === 'function') {
+      broadcastGameEvent(makeGameEvent('DICE_ROLLED', {
+        playerIndex: currentPlayerIdx, dice1: v1, dice2: v2, total: total,
+      }));
+    }
     player.doublesStreak = isDouble ? player.doublesStreak + 1 : 0;
 
     // Regra oficial (seção 18): o 3º resultado consecutivo de dados
@@ -5370,11 +5427,18 @@ rollBtn.addEventListener('click', () => {
       sendToCativeiro(player);
       showEventModal('CATIVEIRO', `${player.name} tirou dados iguais pela ${GAME_RULES.doublesToCativeiro}ª vez seguida e é enviado ao Cativeiro.`, () => {
         rolling = false; rollBtn.disabled = false;
-        nextActivePlayer(); updatePlayerHud();
+        const prevIdx = currentPlayerIdx;
+        nextActivePlayer();
+        if (typeof broadcastGameEvent === 'function') {
+          broadcastGameEvent(makeGameEvent('TURN_ENDED', { playerIndex: prevIdx, nextPlayerIndex: currentPlayerIdx }));
+          broadcastGameEvent(makeGameEvent('TURN_CHANGED', { playerIndex: prevIdx, nextPlayerIndex: currentPlayerIdx }));
+        }
+        updatePlayerHud();
       });
       return;
     }
 
+    const fromSpace = player.currentSpace;
     let cur = player.currentSpace;
     const path = [];
     let lapsThisMove = 0;
@@ -5385,20 +5449,46 @@ rollBtn.addEventListener('click', () => {
       path.push(cur);
     }
 
+    if (typeof broadcastGameEvent === 'function') {
+      broadcastGameEvent(makeGameEvent('MOVE_STARTED', {
+        playerIndex: currentPlayerIdx,
+        fromSpace: fromSpace,
+        toSpace: path[path.length - 1],
+        path: path.slice(),
+      }));
+    }
+
     animateAlongPath(player, path, 0, () => {
       for (let i = 0; i < lapsThisMove; i++) completeLap(player);
+      if (typeof broadcastGameEvent === 'function') {
+        broadcastGameEvent(makeGameEvent('LANDED', {
+          playerIndex: currentPlayerIdx, spaceId: player.currentSpace,
+        }));
+      }
 
       resolveSpace(player, () => {
         if (checkVictory()) { rolling = false; return; }
         if (player.bankrupt) {
-          rolling = false; rollBtn.disabled = false; nextActivePlayer(); updatePlayerHud(); return;
+          rolling = false; rollBtn.disabled = false;
+          const prevIdx = currentPlayerIdx;
+          nextActivePlayer();
+          if (typeof broadcastGameEvent === 'function') {
+            broadcastGameEvent(makeGameEvent('TURN_ENDED', { playerIndex: prevIdx, nextPlayerIndex: currentPlayerIdx }));
+            broadcastGameEvent(makeGameEvent('TURN_CHANGED', { playerIndex: prevIdx, nextPlayerIndex: currentPlayerIdx }));
+          }
+          updatePlayerHud(); return;
         }
         if (isDouble) {
           showGalardaoToast(`${player.name} tirou dados iguais — joga novamente!`);
           rolling = false; rollBtn.disabled = false;
         } else {
           rolling = false; rollBtn.disabled = false;
+          const prevIdx = currentPlayerIdx;
           nextActivePlayer();
+          if (typeof broadcastGameEvent === 'function') {
+            broadcastGameEvent(makeGameEvent('TURN_ENDED', { playerIndex: prevIdx, nextPlayerIndex: currentPlayerIdx }));
+            broadcastGameEvent(makeGameEvent('TURN_CHANGED', { playerIndex: prevIdx, nextPlayerIndex: currentPlayerIdx }));
+          }
         }
         updatePlayerHud();
       });
@@ -5781,6 +5871,8 @@ const LocalTableStore = (() => {
       // todos os jogadores, então não há "outro cliente" para sincronizar.
       return () => {};
     },
+    async pushGameEvent(_tableId, _event) { return; },
+    onGameEventChange(_tableId, _cb) { return () => {}; },
   };
 })();
 
@@ -5943,6 +6035,24 @@ const FirebaseTableStore = (() => {
       const db = await apiOrThrow();
       const { ref, set } = firebaseDb._api;
       await set(ref(db, 'tables/' + tableId + '/gameState'), patch);
+    },
+    async pushGameEvent(tableId, event) {
+      const db = await apiOrThrow();
+      const { ref, set } = firebaseDb._api;
+      await set(ref(db, 'tables/' + tableId + '/lastEvent'), event);
+    },
+    onGameEventChange(tableId, cb) {
+      let stopFn = () => {};
+      let cancelled = false;
+      (async () => {
+        const db = await ensureFirebase().catch(() => null);
+        if (!db || cancelled) return;
+        const { ref, onValue } = firebaseDb._api;
+        stopFn = onValue(ref(db, 'tables/' + tableId + '/lastEvent'), (snap) => {
+          if (snap.exists()) cb(snap.val());
+        });
+      })();
+      return () => { cancelled = true; stopFn(); };
     },
     async setStatus(tableId, status) {
       const db = await apiOrThrow();
@@ -6387,6 +6497,144 @@ function broadcastSharedState() {
   }, 150);
 }
 
+/* ======================================================================
+   EVENTOS ONLINE (camada imediata) — coexiste com o snapshot.
+   LOCAL: não envia. ONLINE: lastEvent no Firebase via listener persistente.
+   ====================================================================== */
+const processedGameEventIds = new Set();
+let unsubscribeGameEvent = null;
+
+function makeGameEvent(type, extra) {
+  return Object.assign({
+    type: type,
+    eventId: 'ev_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9),
+    timestamp: Date.now(),
+    clientId: (typeof CLIENT_ID !== 'undefined' ? CLIENT_ID : null),
+  }, extra || {});
+}
+
+function broadcastGameEvent(event) {
+  if (!MULTIPLAYER_ONLINE || !gameState.tableId || !event) return;
+  if (typeof activeStore !== 'function' || typeof activeStore().pushGameEvent !== 'function') return;
+  if (event.eventId) processedGameEventIds.add(event.eventId);
+  const payload = sanitizeForFirebase(event);
+  console.info('[JORNADA][EVENT] →', payload.type, payload.eventId);
+  activeStore().pushGameEvent(gameState.tableId, payload).catch((err) => {
+    console.error('[JORNADA][EVENT] falha', err);
+  });
+}
+
+function handleRemoteGameEvent(event) {
+  if (!event || !event.type) return;
+  if (event.clientId && typeof CLIENT_ID !== 'undefined' && event.clientId === CLIENT_ID) return;
+  if (event.eventId) {
+    if (processedGameEventIds.has(event.eventId)) return;
+    processedGameEventIds.add(event.eventId);
+    if (processedGameEventIds.size > 100) {
+      processedGameEventIds.delete(processedGameEventIds.values().next().value);
+    }
+  }
+  const pi = event.playerIndex;
+  const p = (typeof pi === 'number') ? players[pi] : null;
+
+  switch (event.type) {
+    case 'DICE_ROLLED': {
+      const d1 = event.dice1, d2 = event.dice2;
+      const tot = event.total != null ? event.total : (Number(d1) + Number(d2));
+      lastDiceRoll = { dice1Value: d1, dice2Value: d2, diceTotal: tot };
+      diceResultEl.innerHTML = `${d1} + ${d2} = <b>${tot}</b>${d1 === d2 ? ' (dados iguais)' : ''}`;
+      break;
+    }
+    case 'MOVE_STARTED': {
+      if (!p || !Array.isArray(event.path) || !event.path.length) break;
+      // Só animação visual — não resolveSpace / economia
+      animateAlongPath(p, event.path, 0, () => {});
+      break;
+    }
+    case 'LANDED': {
+      if (!p || event.spaceId == null) break;
+      p.currentSpace = event.spaceId;
+      if (typeof positionSinglePawn === 'function') positionSinglePawn(p);
+      break;
+    }
+    case 'PROPERTY_PURCHASED': {
+      if (event.spaceId == null || pi == null) break;
+      const st = propertyState[event.spaceId];
+      if (st) st.owner = pi;
+      if (p) {
+        if (!p.properties.includes(event.spaceId)) p.properties.push(event.spaceId);
+        if (typeof event.galardoes === 'number') p.galardoes = event.galardoes;
+      }
+      updatePlayersPanel();
+      showGalardaoToast((p ? p.name : ('P' + (pi + 1))) + ' comprou ' + (boardSpaces[event.spaceId] ? boardSpaces[event.spaceId].name : event.spaceId));
+      break;
+    }
+    case 'PROPERTY_DECLINED':
+      break;
+    case 'RENT_PAID': {
+      if (p && typeof event.payerGalardoes === 'number') p.galardoes = event.payerGalardoes;
+      if (typeof event.ownerIndex === 'number' && players[event.ownerIndex] && typeof event.ownerGalardoes === 'number') {
+        players[event.ownerIndex].galardoes = event.ownerGalardoes;
+      }
+      updatePlayersPanel();
+      if (event.amount != null) {
+        showGalardaoToast((p ? p.name : 'Jogador') + ' pagou ' + event.amount + ' G de aluguel');
+      }
+      break;
+    }
+    case 'PROPERTY_BUILT': {
+      if (event.spaceId != null && propertyState[event.spaceId]) {
+        propertyState[event.spaceId].level = event.level != null ? event.level : (propertyState[event.spaceId].level + 1);
+      }
+      if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
+      updatePlayersPanel();
+      break;
+    }
+    case 'PROPERTY_SOLD': {
+      if (event.spaceId != null && propertyState[event.spaceId]) {
+        propertyState[event.spaceId].level = event.level != null ? event.level : Math.max(0, propertyState[event.spaceId].level - 1);
+      }
+      if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
+      updatePlayersPanel();
+      break;
+    }
+    case 'PROPERTY_MORTGAGED': {
+      if (event.spaceId != null && propertyState[event.spaceId]) propertyState[event.spaceId].mortgaged = true;
+      if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
+      updatePlayersPanel();
+      break;
+    }
+    case 'PROPERTY_REDEEMED': {
+      if (event.spaceId != null && propertyState[event.spaceId]) propertyState[event.spaceId].mortgaged = false;
+      if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
+      updatePlayersPanel();
+      break;
+    }
+    case 'CATIVEIRO': {
+      if (!p) break;
+      p.currentSpace = event.spaceId != null ? event.spaceId : p.currentSpace;
+      p.cativeiroTurns = event.cativeiroTurns != null ? event.cativeiroTurns : p.cativeiroTurns;
+      if (typeof positionSinglePawn === 'function') positionSinglePawn(p);
+      showGalardaoToast((p.name || 'Jogador') + ' foi ao Cativeiro');
+      break;
+    }
+    case 'TURN_ENDED':
+    case 'TURN_CHANGED': {
+      if (typeof event.nextPlayerIndex === 'number') currentPlayerIdx = event.nextPlayerIndex;
+      updatePlayerHud();
+      break;
+    }
+    case 'GAME_OVER': {
+      if (event.winnerId != null) GAME_CORE.winner = event.winnerId;
+      rollBtn.disabled = true;
+      updatePlayerHud();
+      break;
+    }
+    default:
+      break;
+  }
+}
+
 // Aplica um estado recebido de outro cliente (a "realidade" da mesa) ao
 // motor local. Nunca mexe em câmera/animações/renderização — apenas nos
 // dados que representam a partida.
@@ -6473,9 +6721,15 @@ function enterBoardFromTable(t) {
   });
 
   if (unsubscribeGameState) { unsubscribeGameState(); unsubscribeGameState = null; }
+  if (typeof unsubscribeGameEvent !== 'undefined' && unsubscribeGameEvent) {
+    unsubscribeGameEvent(); unsubscribeGameEvent = null;
+  }
   if (MULTIPLAYER_ONLINE) {
     unsubscribeGameState = activeStore().onGameStateChange(gameState.tableId, applyRemoteSharedState);
-    console.info('[JORNADA][SYNC] listener de gameState conectado para a mesa', gameState.tableId);
+    if (typeof activeStore().onGameEventChange === 'function') {
+      unsubscribeGameEvent = activeStore().onGameEventChange(gameState.tableId, handleRemoteGameEvent);
+    }
+    console.info('[JORNADA][SYNC] listeners gameState + lastEvent conectados para a mesa', gameState.tableId);
   }
 
   // Reaproveita 100% o motor e o tabuleiro 3D já existentes — nenhuma
@@ -6495,6 +6749,9 @@ function goToHomeScreen() {
   MULTIPLAYER_ONLINE = false;
   MY_TURN_SLOT = null;
   if (unsubscribeGameState) { unsubscribeGameState(); unsubscribeGameState = null; }
+  if (typeof unsubscribeGameEvent !== 'undefined' && unsubscribeGameEvent) {
+    unsubscribeGameEvent(); unsubscribeGameEvent = null;
+  }
   if (unsubscribeTables) { unsubscribeTables(); unsubscribeTables = null; }
   hideAllTableScreens();
   homeScreen.classList.remove('hidden');
@@ -6514,6 +6771,9 @@ function goToTableListScreen() {
   MULTIPLAYER_ONLINE = false;
   MY_TURN_SLOT = null;
   if (unsubscribeGameState) { unsubscribeGameState(); unsubscribeGameState = null; }
+  if (typeof unsubscribeGameEvent !== 'undefined' && unsubscribeGameEvent) {
+    unsubscribeGameEvent(); unsubscribeGameEvent = null;
+  }
   hideAllTableScreens();
   tableListScreen.classList.remove('hidden');
   pauseScreen.classList.add('hidden');
@@ -6532,6 +6792,9 @@ function startLocalMatch(count) {
   gameState.tableId = null;
   MY_TURN_SLOT = null;
   if (unsubscribeGameState) { unsubscribeGameState(); unsubscribeGameState = null; }
+  if (typeof unsubscribeGameEvent !== 'undefined' && unsubscribeGameEvent) {
+    unsubscribeGameEvent(); unsubscribeGameEvent = null;
+  }
   if (unsubscribeTables) { unsubscribeTables(); unsubscribeTables = null; }
   startMatch(count);
 }
@@ -6627,6 +6890,9 @@ async function endMatch() {
 
   const tableId = gameState.tableId;
   if (unsubscribeGameState) { unsubscribeGameState(); unsubscribeGameState = null; }
+  if (typeof unsubscribeGameEvent !== 'undefined' && unsubscribeGameEvent) {
+    unsubscribeGameEvent(); unsubscribeGameEvent = null;
+  }
   MULTIPLAYER_ONLINE = false;
 
   if (tableId && ACTIVE_MODE === 'online') {
