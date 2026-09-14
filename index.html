@@ -429,7 +429,24 @@
     <div class="lobbySlots" id="lobbySlots"></div>
     <p class="formError" id="lobbyError"></p>
     <button class="menuBtn primary" id="btnStartFromLobby">INICIAR PARTIDA</button>
+    <button class="menuBtn danger" id="btnForceDeleteTable">EXCLUIR MESA</button>
     <button class="menuBtn danger" id="btnLeaveLobby">SAIR DA MESA</button>
+  </div>
+</div>
+
+<!-- Modal: exclusão forçada da mesa por senha (teste — qualquer um com a senha) -->
+<div id="forceDeleteModal" class="overlay hidden">
+  <div class="panel">
+    <h2>EXCLUIR MESA</h2>
+    <p class="sub">Esta ação excluirá esta mesa e todos os dados associados a ela.</p>
+    <p class="sub">Digite a senha de 4 dígitos para confirmar.</p>
+    <div class="fieldRow">
+      <label for="forceDeletePassword">Senha</label>
+      <input id="forceDeletePassword" type="password" inputmode="numeric" maxlength="4" pattern="[0-9]*" autocomplete="off" placeholder="••••">
+    </div>
+    <p class="formError" id="forceDeleteError"></p>
+    <button class="menuBtn danger" id="btnConfirmForceDelete">CONFIRMAR EXCLUSÃO</button>
+    <button class="menuBtn" id="btnCancelForceDelete">CANCELAR</button>
   </div>
 </div>
 
@@ -5475,7 +5492,13 @@ const lobbyCountTextEl   = el('lobbyCountText');
 const lobbySlotsEl       = el('lobbySlots');
 const lobbyErrorEl       = el('lobbyError');
 const btnStartFromLobbyEl = el('btnStartFromLobby');
+const btnForceDeleteTableEl = el('btnForceDeleteTable');
 const btnLeaveLobbyEl     = el('btnLeaveLobby');
+const forceDeleteModal    = el('forceDeleteModal');
+const forceDeletePasswordEl = el('forceDeletePassword');
+const forceDeleteErrorEl  = el('forceDeleteError');
+const btnConfirmForceDeleteEl = el('btnConfirmForceDelete');
+const btnCancelForceDeleteEl  = el('btnCancelForceDelete');
 
 let selectedPlayerCount = null;
 let settingsReturnTo = null; // para onde voltar ao fechar CONFIGURAÇÕES
@@ -5492,6 +5515,7 @@ function hideAllTableScreens() {
   joinTableModal.classList.add('hidden');
   setupScreen.classList.add('hidden');
   tableLobbyScreen.classList.add('hidden');
+  if (forceDeleteModal) forceDeleteModal.classList.add('hidden');
 }
 
 
@@ -5698,10 +5722,18 @@ const LocalTableStore = (() => {
       writeAll(tables);
       return tableId;
     },
-    async deleteTable(tableId) {
+    async deleteTable(tableId, password) {
       const tables = readAll();
       const t = tables[tableId];
-      if (!t || Object.keys(t.players).length > 0) throw new Error('AÇÃO NÃO PERMITIDA');
+      if (!t || t.status === 'empty') throw new Error('MESA NÃO ENCONTRADA');
+      // Com senha: exclusão forçada (lobby). Sem senha: só mesa vazia (lista).
+      if (password !== undefined && password !== null && password !== '') {
+        if (String(password) !== String(t.password)) throw new Error('SENHA INCORRETA');
+        tables[tableId] = emptyTable(tableId);
+        writeAll(tables);
+        return;
+      }
+      if (Object.keys(t.players || {}).length > 0) throw new Error('AÇÃO NÃO PERMITIDA');
       tables[tableId] = emptyTable(tableId);
       writeAll(tables);
     },
@@ -5870,15 +5902,32 @@ const FirebaseTableStore = (() => {
       if (errorMsg) throw new Error(errorMsg);
       return tableId;
     },
-    async deleteTable(tableId) {
+    async deleteTable(tableId, password) {
       const db = await apiOrThrow();
       const { ref, runTransaction } = firebaseDb._api;
-      // Também protegido por transação: evita que a mesa seja excluída
-      // bem no instante em que outro cliente está entrando nela.
+      let errorMsg = null;
+      // Com senha: exclusão forçada (lobby) — remove o nó inteiro se a senha bater.
+      // Sem senha: só mesa vazia (lista externa), comportamento anterior.
       const result = await runTransaction(ref(db, 'tables/' + tableId), (t) => {
-        if (t && Object.keys(normalizePlayers(t.players)).length > 0) return; // aborta: mesa não está mais vazia
-        return null; // remove atomicamente
+        if (t === null || !t.status || t.status === 'empty') {
+          errorMsg = 'MESA NÃO ENCONTRADA';
+          return t;
+        }
+        if (password !== undefined && password !== null && password !== '') {
+          if (String(password) !== String(t.password)) {
+            errorMsg = 'SENHA INCORRETA';
+            return t; // não altera
+          }
+          return null; // remove atomicamente (mesmo com jogadores / playing)
+        }
+        const filled = Object.keys(normalizePlayers(t.players)).length;
+        if (filled > 0) {
+          errorMsg = 'AÇÃO NÃO PERMITIDA';
+          return; // aborta: mesa não está vazia
+        }
+        return null;
       });
+      if (errorMsg) throw new Error(errorMsg);
       if (!result.committed) throw new Error('AÇÃO NÃO PERMITIDA');
     },
     async leaveTable(tableId) {
@@ -5993,7 +6042,20 @@ function subscribeTables() {
   unsubscribeTables = activeStore().onChange((tables) => {
     currentTablesSnapshot = tables;
     if (gameState.phase === 'tables') renderTableList(tables);
-    if (gameState.phase === 'lobby' && gameState.tableId) renderLobby(tables[gameState.tableId]);
+    // Mesa removida enquanto estamos no lobby ou em partida → volta à lista
+    if ((gameState.phase === 'lobby' || gameState.phase === 'playing') && gameState.tableId) {
+      const t = tables[gameState.tableId];
+      if (!t || t.status === 'empty') {
+        if (unsubscribeGameState) { try { unsubscribeGameState(); } catch (_) {} unsubscribeGameState = null; }
+        MULTIPLAYER_ONLINE = false;
+        MY_TURN_SLOT = null;
+        gameState.tableId = null;
+        showGalardaoToast('MESA EXCLUÍDA');
+        goToTableListScreen();
+        return;
+      }
+      if (gameState.phase === 'lobby') renderLobby(t);
+    }
   });
 }
 
@@ -6243,6 +6305,42 @@ btnLeaveLobbyEl.addEventListener('click', async () => {
   gameState.tableId = null;
   try { await activeStore().leaveTable(id); } catch (e) {}
   goToTableListScreen();
+});
+
+// Exclusão forçada por senha (qualquer jogador no lobby — ferramenta de teste)
+btnForceDeleteTableEl.addEventListener('click', () => {
+  if (!gameState.tableId) return;
+  forceDeletePasswordEl.value = '';
+  forceDeleteErrorEl.textContent = '';
+  forceDeleteModal.classList.remove('hidden');
+});
+btnCancelForceDeleteEl.addEventListener('click', () => {
+  forceDeleteModal.classList.add('hidden');
+  forceDeleteErrorEl.textContent = '';
+});
+forceDeletePasswordEl.addEventListener('input', () => {
+  forceDeletePasswordEl.value = forceDeletePasswordEl.value.replace(/\D/g, '').slice(0, 4);
+});
+btnConfirmForceDeleteEl.addEventListener('click', async () => {
+  const pass = (forceDeletePasswordEl.value || '').trim();
+  if (!/^\d{4}$/.test(pass)) {
+    forceDeleteErrorEl.textContent = 'A senha deve ter exatamente 4 números.';
+    return;
+  }
+  const id = gameState.tableId;
+  if (!id) return;
+  try {
+    await activeStore().deleteTable(id, pass);
+    forceDeleteModal.classList.add('hidden');
+    if (unsubscribeGameState) { try { unsubscribeGameState(); } catch (_) {} unsubscribeGameState = null; }
+    MULTIPLAYER_ONLINE = false;
+    MY_TURN_SLOT = null;
+    gameState.tableId = null;
+    showGalardaoToast('MESA EXCLUÍDA');
+    goToTableListScreen();
+  } catch (e) {
+    forceDeleteErrorEl.textContent = (e && e.message) ? e.message : 'SENHA INCORRETA';
+  }
 });
 
 btnStartFromLobbyEl.addEventListener('click', async () => {
