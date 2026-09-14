@@ -6127,20 +6127,31 @@ function buildTableCard(id, t) {
   } else if (!isFull) {
     actions.appendChild(makeSmallBtn('ENTRAR', () => openJoinModal(id, t)));
   }
-  if (filled === 0) {
-    actions.appendChild(makeSmallBtn('EXCLUIR MESA', () => deleteTableFlow(id), true));
-  }
+  // Exclusão por senha disponível em TODAS as mesas existentes (mesmo lotadas).
+  // Ferramenta de teste para limpar mesas fantasmas sem precisar ser Host.
+  actions.appendChild(makeSmallBtn('EXCLUIR MESA', () => openForceDeleteModal(id), true));
   if (actions.children.length) card.appendChild(actions);
 
   return card;
 }
 
 async function deleteTableFlow(id) {
+  // Mantido para compatibilidade: exclusão sem senha só se a mesa estiver vazia.
   try {
     await activeStore().deleteTable(id);
   } catch (e) {
     showGalardaoToast(e.message || 'AÇÃO NÃO PERMITIDA');
   }
+}
+
+/** Abre o modal de exclusão forçada (senha) para a mesa indicada. */
+let pendingForceDeleteTableId = null;
+function openForceDeleteModal(tableId) {
+  pendingForceDeleteTableId = tableId || gameState.tableId || null;
+  if (!pendingForceDeleteTableId) return;
+  forceDeletePasswordEl.value = '';
+  forceDeleteErrorEl.textContent = '';
+  forceDeleteModal.classList.remove('hidden');
 }
 
 
@@ -6307,16 +6318,12 @@ btnLeaveLobbyEl.addEventListener('click', async () => {
   goToTableListScreen();
 });
 
-// Exclusão forçada por senha (qualquer jogador no lobby — ferramenta de teste)
-btnForceDeleteTableEl.addEventListener('click', () => {
-  if (!gameState.tableId) return;
-  forceDeletePasswordEl.value = '';
-  forceDeleteErrorEl.textContent = '';
-  forceDeleteModal.classList.remove('hidden');
-});
+// Exclusão forçada por senha — lista de mesas E lobby (ferramenta de teste)
+btnForceDeleteTableEl.addEventListener('click', () => openForceDeleteModal(gameState.tableId));
 btnCancelForceDeleteEl.addEventListener('click', () => {
   forceDeleteModal.classList.add('hidden');
   forceDeleteErrorEl.textContent = '';
+  pendingForceDeleteTableId = null;
 });
 forceDeletePasswordEl.addEventListener('input', () => {
   forceDeletePasswordEl.value = forceDeletePasswordEl.value.replace(/\D/g, '').slice(0, 4);
@@ -6327,15 +6334,16 @@ btnConfirmForceDeleteEl.addEventListener('click', async () => {
     forceDeleteErrorEl.textContent = 'A senha deve ter exatamente 4 números.';
     return;
   }
-  const id = gameState.tableId;
+  const id = pendingForceDeleteTableId || gameState.tableId;
   if (!id) return;
   try {
     await activeStore().deleteTable(id, pass);
     forceDeleteModal.classList.add('hidden');
+    pendingForceDeleteTableId = null;
     if (unsubscribeGameState) { try { unsubscribeGameState(); } catch (_) {} unsubscribeGameState = null; }
     MULTIPLAYER_ONLINE = false;
     MY_TURN_SLOT = null;
-    gameState.tableId = null;
+    if (gameState.tableId === id) gameState.tableId = null;
     showGalardaoToast('MESA EXCLUÍDA');
     goToTableListScreen();
   } catch (e) {
