@@ -4962,7 +4962,7 @@ function updatePlayerHud() {
 
 // Painel compacto de Galardões de todos os jogadores ativos (seção 6 do
 // prompt v1.1) — o jogador atual recebe destaque visual maior.
-function updatePlayersPanel() {
+function updatePlayersPanel(opts) {
   playersPanelEl.innerHTML = '';
   players.forEach((p, i) => {
     if (!p.active) return;
@@ -4979,9 +4979,10 @@ function updatePlayersPanel() {
     row.append(dot, name, g);
     playersPanelEl.appendChild(row);
   });
-  // Ponte com o estado compartilhado (seção 20 do bloco de mesas, abaixo):
-  // toda vez que o painel de jogadores é atualizado, é porque algo real
-  // da partida mudou — este é o ponto único de saída para o Firebase.
+  // Ponte com o estado compartilhado: só o autor da ação deve transmitir.
+  // Clientes remotos que apenas refletem eventos passam { skipBroadcast: true }.
+  if (opts && opts.skipBroadcast) return;
+  if (typeof applyingRemoteState !== 'undefined' && applyingRemoteState) return;
   if (typeof broadcastSharedState === 'function') broadcastSharedState();
 }
 
@@ -6524,6 +6525,10 @@ function broadcastGameEvent(event) {
   });
 }
 
+// Peões com animação remota em curso (MOVE_STARTED). Snapshot não deve
+// teleportar o mesh enquanto isto for true — só atualiza estado lógico.
+const remoteMovementAnimations = Object.create(null);
+
 function handleRemoteGameEvent(event) {
   if (!event || !event.type) return;
   if (event.clientId && typeof CLIENT_ID !== 'undefined' && event.clientId === CLIENT_ID) return;
@@ -6536,6 +6541,7 @@ function handleRemoteGameEvent(event) {
   }
   const pi = event.playerIndex;
   const p = (typeof pi === 'number') ? players[pi] : null;
+  const panelOpts = { skipBroadcast: true };
 
   switch (event.type) {
     case 'DICE_ROLLED': {
@@ -6547,14 +6553,33 @@ function handleRemoteGameEvent(event) {
     }
     case 'MOVE_STARTED': {
       if (!p || !Array.isArray(event.path) || !event.path.length) break;
-      // Só animação visual — não resolveSpace / economia
-      animateAlongPath(p, event.path, 0, () => {});
+      if (remoteMovementAnimations[pi]) break; // já animando este peão
+      // Garante partida visual na casa de origem (não no destino do snapshot)
+      if (event.fromSpace != null && boardSpaces[event.fromSpace]) {
+        const fs = boardSpaces[event.fromSpace];
+        p.currentSpace = event.fromSpace;
+        p.mesh.position.set(fs.position.x, fs.position.y + SPACE_HEIGHT / 2, fs.position.z);
+      }
+      remoteMovementAnimations[pi] = true;
+      // Só animação visual casa a casa — não resolveSpace / economia
+      animateAlongPath(p, event.path, 0, () => {
+        remoteMovementAnimations[pi] = false;
+        const endId = event.path[event.path.length - 1];
+        if (endId != null) {
+          p.currentSpace = endId;
+          if (typeof positionSinglePawn === 'function') positionSinglePawn(p);
+        }
+      });
       break;
     }
     case 'LANDED': {
       if (!p || event.spaceId == null) break;
       p.currentSpace = event.spaceId;
-      if (typeof positionSinglePawn === 'function') positionSinglePawn(p);
+      // Se a animação ainda estiver rodando, não teleporta; o callback do
+      // MOVE_STARTED finaliza. Se já terminou, encaixa na casa.
+      if (!remoteMovementAnimations[pi]) {
+        if (typeof positionSinglePawn === 'function') positionSinglePawn(p);
+      }
       break;
     }
     case 'PROPERTY_PURCHASED': {
@@ -6565,7 +6590,7 @@ function handleRemoteGameEvent(event) {
         if (!p.properties.includes(event.spaceId)) p.properties.push(event.spaceId);
         if (typeof event.galardoes === 'number') p.galardoes = event.galardoes;
       }
-      updatePlayersPanel();
+      updatePlayersPanel(panelOpts);
       showGalardaoToast((p ? p.name : ('P' + (pi + 1))) + ' comprou ' + (boardSpaces[event.spaceId] ? boardSpaces[event.spaceId].name : event.spaceId));
       break;
     }
@@ -6576,7 +6601,7 @@ function handleRemoteGameEvent(event) {
       if (typeof event.ownerIndex === 'number' && players[event.ownerIndex] && typeof event.ownerGalardoes === 'number') {
         players[event.ownerIndex].galardoes = event.ownerGalardoes;
       }
-      updatePlayersPanel();
+      updatePlayersPanel(panelOpts);
       if (event.amount != null) {
         showGalardaoToast((p ? p.name : 'Jogador') + ' pagou ' + event.amount + ' G de aluguel');
       }
@@ -6587,7 +6612,7 @@ function handleRemoteGameEvent(event) {
         propertyState[event.spaceId].level = event.level != null ? event.level : (propertyState[event.spaceId].level + 1);
       }
       if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
-      updatePlayersPanel();
+      updatePlayersPanel(panelOpts);
       break;
     }
     case 'PROPERTY_SOLD': {
@@ -6595,23 +6620,24 @@ function handleRemoteGameEvent(event) {
         propertyState[event.spaceId].level = event.level != null ? event.level : Math.max(0, propertyState[event.spaceId].level - 1);
       }
       if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
-      updatePlayersPanel();
+      updatePlayersPanel(panelOpts);
       break;
     }
     case 'PROPERTY_MORTGAGED': {
       if (event.spaceId != null && propertyState[event.spaceId]) propertyState[event.spaceId].mortgaged = true;
       if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
-      updatePlayersPanel();
+      updatePlayersPanel(panelOpts);
       break;
     }
     case 'PROPERTY_REDEEMED': {
       if (event.spaceId != null && propertyState[event.spaceId]) propertyState[event.spaceId].mortgaged = false;
       if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
-      updatePlayersPanel();
+      updatePlayersPanel(panelOpts);
       break;
     }
     case 'CATIVEIRO': {
       if (!p) break;
+      remoteMovementAnimations[pi] = false;
       p.currentSpace = event.spaceId != null ? event.spaceId : p.currentSpace;
       p.cativeiroTurns = event.cativeiroTurns != null ? event.cativeiroTurns : p.cativeiroTurns;
       if (typeof positionSinglePawn === 'function') positionSinglePawn(p);
@@ -6665,10 +6691,18 @@ function applyRemoteSharedState(remote) {
     remote.players.forEach((rp, i) => {
       const p = players[i];
       if (!p) return;
-      const moved = p.currentSpace !== rp.currentSpace;
+      const animating = !!(typeof remoteMovementAnimations !== 'undefined' && remoteMovementAnimations[i]);
+      // Estado lógico sempre atualiza; mesh só se NÃO estiver em MOVE_STARTED remoto
+      const prevSpace = p.currentSpace;
       Object.assign(p, rp, { properties: (rp.properties || []).slice() });
       if (p.active && !p.mesh.parent) boardGroup.add(p.mesh);
       if (!p.active && p.mesh.parent) boardGroup.remove(p.mesh);
+      if (animating) {
+        // Mantém currentSpace lógico do snapshot, mas NÃO teleporta o mesh
+        // (a animação continua casa a casa até o callback de MOVE_STARTED).
+        return;
+      }
+      const moved = prevSpace !== rp.currentSpace;
       if (moved) {
         const s = boardSpaces[p.currentSpace];
         if (s) p.mesh.position.set(s.position.x, s.position.y + SPACE_HEIGHT / 2, s.position.z);
