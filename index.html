@@ -4770,6 +4770,128 @@ range(1, 66).forEach((id) => {
 });
 window.JORNADA_PROPERTY_STATE = propertyState;
 
+/* ======================================================================
+   CONSTRUÇÕES 3D NAS PROPRIEDADES (apenas visual — estado = propertyState)
+   Geometria compartilhada; escala/cor por nível e dono.
+   ====================================================================== */
+const propertyBuildingMeshes = {}; // id -> THREE.Group
+const BUILDING_GEO = {
+  base: new THREE.BoxGeometry(0.14, 0.04, 0.12),
+  body: new THREE.BoxGeometry(0.12, 0.10, 0.10),
+  roof: new THREE.ConeGeometry(0.10, 0.07, 4),
+  chimney: new THREE.BoxGeometry(0.025, 0.05, 0.025),
+};
+const BUILDING_MAT_NEUTRAL = new THREE.MeshStandardMaterial({
+  color: 0xc4b8a0, roughness: 0.9, metalness: 0.05,
+});
+
+function getOwnerColorHex(ownerId) {
+  if (ownerId == null || ownerId < 0) return 0x888888;
+  if (players[ownerId] && typeof players[ownerId].color === 'number') return players[ownerId].color;
+  return PLAYER_COLORS[ownerId % PLAYER_COLORS.length] || 0x888888;
+}
+
+function createPropertyBuildingGroup(ownerColor, level) {
+  const g = new THREE.Group();
+  g.name = 'propertyBuilding';
+  const scale = 0.75 + Math.min(level, 4) * 0.18;
+  const bodyH = 0.10 + Math.min(level, 4) * 0.035;
+
+  const base = new THREE.Mesh(BUILDING_GEO.base, BUILDING_MAT_NEUTRAL);
+  base.position.y = 0.02;
+  g.add(base);
+
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: ownerColor,
+    roughness: 0.75,
+    metalness: 0.12,
+    emissive: 0x000000,
+    emissiveIntensity: 0,
+  });
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.12, bodyH, 0.10),
+    bodyMat
+  );
+  body.position.y = 0.04 + bodyH / 2;
+  body.name = 'buildingBody';
+  g.add(body);
+
+  const roofMat = new THREE.MeshStandardMaterial({
+    color: 0x5a4a3a, roughness: 0.85, metalness: 0.08,
+  });
+  const roof = new THREE.Mesh(BUILDING_GEO.roof, roofMat);
+  roof.rotation.y = Math.PI / 4;
+  roof.position.y = 0.04 + bodyH + 0.035;
+  g.add(roof);
+
+  if (level >= 3) {
+    const chim = new THREE.Mesh(BUILDING_GEO.chimney, BUILDING_MAT_NEUTRAL);
+    chim.position.set(0.04, 0.04 + bodyH + 0.04, 0.02);
+    g.add(chim);
+  }
+
+  // Brilho sutil no nível máximo
+  if (level >= (GAME_RULES.maxConstructionLevel || 4)) {
+    bodyMat.emissive = new THREE.Color(ownerColor);
+    bodyMat.emissiveIntensity = 0.35;
+    const glow = new THREE.PointLight(ownerColor, 0.35, 0.85, 2);
+    glow.position.y = 0.12 + bodyH;
+    g.add(glow);
+  }
+
+  g.scale.setScalar(scale);
+  return g;
+}
+
+function removePropertyBuildingVisual(id) {
+  const mesh = propertyBuildingMeshes[id];
+  if (mesh) {
+    if (mesh.parent) mesh.parent.remove(mesh);
+    mesh.traverse((o) => {
+      if (o.geometry && o.geometry !== BUILDING_GEO.base && o.geometry !== BUILDING_GEO.roof &&
+          o.geometry !== BUILDING_GEO.chimney && o.geometry !== BUILDING_GEO.body) {
+        // body usa geo dinâmica — dispose
+        if (o.name === 'buildingBody' && o.geometry) o.geometry.dispose();
+      }
+      if (o.material && o.material !== BUILDING_MAT_NEUTRAL) {
+        if (o.material.dispose) o.material.dispose();
+      }
+    });
+    delete propertyBuildingMeshes[id];
+  }
+}
+
+function updatePropertyBuildingVisual(id) {
+  const st = propertyState[id];
+  const space = boardSpaces[id];
+  if (!st || !space || space.type !== 'PROPRIEDADE') return;
+
+  // Sem dono ou nível 0: remove construção
+  if (st.owner == null || st.level <= 0) {
+    removePropertyBuildingVisual(id);
+    return;
+  }
+
+  removePropertyBuildingVisual(id);
+  const color = getOwnerColorHex(st.owner);
+  const group = createPropertyBuildingGroup(color, st.level);
+  // Posição: centro da casa, levemente deslocado para não cobrir o número
+  const y = space.position.y + SPACE_HEIGHT / 2 + 0.02;
+  group.position.set(space.position.x * 0.92, y, space.position.z * 0.92);
+  if (st.mortgaged) group.traverse((o) => {
+    if (o.material && o.material.opacity !== undefined) {
+      o.material.transparent = true;
+      o.material.opacity = 0.45;
+    }
+  });
+  boardGroup.add(group);
+  propertyBuildingMeshes[id] = group;
+}
+
+function refreshAllPropertyBuildingVisuals() {
+  Object.keys(propertyState).forEach((id) => updatePropertyBuildingVisual(Number(id)));
+}
+
 // Posiciona os peões ativos em pequeno círculo ao redor do centro da
 // casa, suportando de 2 a 6 peões na mesma casa sem sobreposição visual.
 function pawnOffset(indexAmongActive, totalActive) {
@@ -4808,6 +4930,7 @@ function activatePlayers(count) {
     propertyState[id].level = 0;
     propertyState[id].mortgaged = false;
   });
+  if (typeof refreshAllPropertyBuildingVisuals === 'function') refreshAllPropertyBuildingVisuals();
   GAME_CORE.winner = null;
   GAME_CORE.log = [];
   positionActivePawnsAt(1);
@@ -5133,6 +5256,7 @@ function declareBankruptcy(player) {
   logEvent(`${player.name} foi eliminado (falência).`);
   player.properties.forEach((id) => {
     propertyState[id].owner = null; propertyState[id].level = 0; propertyState[id].mortgaged = false;
+    if (typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(id);
   });
   player.properties = [];
   if (player.mesh.parent) boardGroup.remove(player.mesh);
@@ -5178,6 +5302,7 @@ function buyProperty(player, id) {
   propertyState[id].owner = player.id;
   player.properties.push(id);
   showGalardaoToast(`${player.name} comprou ${boardSpaces[id].name}`);
+  if (typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(id);
   updatePlayersPanel();
   if (typeof broadcastGameEvent === 'function') {
     broadcastGameEvent(makeGameEvent('PROPERTY_PURCHASED', {
@@ -5198,6 +5323,7 @@ function buildOnProperty(player, id) {
   transferGalardoes(player, null, cost, `Construção em ${boardSpaces[id].name}`);
   propertyState[id].level += 1;
   showGalardaoToast(`Construção em ${boardSpaces[id].name} (nível ${propertyState[id].level})`);
+  if (typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(id);
   if (typeof broadcastGameEvent === 'function') {
     broadcastGameEvent(makeGameEvent('PROPERTY_BUILT', {
       playerIndex: player.id, spaceId: id, level: propertyState[id].level, galardoes: player.galardoes,
@@ -5212,6 +5338,7 @@ function sellBuilding(player, id) {
   st.level -= 1;
   transferGalardoes(null, player, refund, `Venda de construção em ${boardSpaces[id].name}`);
   showGalardaoToast(`Construção vendida em ${boardSpaces[id].name} (+${refund} G)`);
+  if (typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(id);
   if (typeof broadcastGameEvent === 'function') {
     broadcastGameEvent(makeGameEvent('PROPERTY_SOLD', {
       playerIndex: player.id, spaceId: id, level: st.level, galardoes: player.galardoes,
@@ -5226,6 +5353,7 @@ function mortgageProperty(player, id, silent) {
   st.mortgaged = true;
   transferGalardoes(null, player, value, `Hipoteca de ${boardSpaces[id].name}`);
   if (!silent) showGalardaoToast(`${boardSpaces[id].name} hipotecada (+${value} G)`);
+  if (typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(id);
   if (typeof broadcastGameEvent === 'function') {
     broadcastGameEvent(makeGameEvent('PROPERTY_MORTGAGED', {
       playerIndex: player.id, spaceId: id, galardoes: player.galardoes,
@@ -5242,6 +5370,7 @@ function redeemMortgage(player, id) {
   transferGalardoes(player, null, cost, `Resgate de hipoteca de ${boardSpaces[id].name}`);
   st.mortgaged = false;
   showGalardaoToast(`Hipoteca de ${boardSpaces[id].name} resgatada`);
+  if (typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(id);
   if (typeof broadcastGameEvent === 'function') {
     broadcastGameEvent(makeGameEvent('PROPERTY_REDEEMED', {
       playerIndex: player.id, spaceId: id, galardoes: player.galardoes,
@@ -7036,6 +7165,7 @@ function handleRemoteGameEvent(event) {
         if (!p.properties.includes(event.spaceId)) p.properties.push(event.spaceId);
         if (typeof event.galardoes === 'number') p.galardoes = event.galardoes;
       }
+      if (typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(event.spaceId);
       updatePlayersPanel(panelOpts);
       showGalardaoToast((p ? p.name : ('P' + (pi + 1))) + ' comprou ' + (boardSpaces[event.spaceId] ? boardSpaces[event.spaceId].name : event.spaceId));
       break;
@@ -7058,6 +7188,7 @@ function handleRemoteGameEvent(event) {
         propertyState[event.spaceId].level = event.level != null ? event.level : (propertyState[event.spaceId].level + 1);
       }
       if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
+      if (event.spaceId != null && typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(event.spaceId);
       updatePlayersPanel(panelOpts);
       break;
     }
@@ -7066,18 +7197,21 @@ function handleRemoteGameEvent(event) {
         propertyState[event.spaceId].level = event.level != null ? event.level : Math.max(0, propertyState[event.spaceId].level - 1);
       }
       if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
+      if (event.spaceId != null && typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(event.spaceId);
       updatePlayersPanel(panelOpts);
       break;
     }
     case 'PROPERTY_MORTGAGED': {
       if (event.spaceId != null && propertyState[event.spaceId]) propertyState[event.spaceId].mortgaged = true;
       if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
+      if (event.spaceId != null && typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(event.spaceId);
       updatePlayersPanel(panelOpts);
       break;
     }
     case 'PROPERTY_REDEEMED': {
       if (event.spaceId != null && propertyState[event.spaceId]) propertyState[event.spaceId].mortgaged = false;
       if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
+      if (event.spaceId != null && typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(event.spaceId);
       updatePlayersPanel(panelOpts);
       break;
     }
@@ -7157,6 +7291,7 @@ function applyRemoteSharedState(remote) {
     Object.entries(remote.properties || {}).forEach(([id, s]) => {
       if (propertyState[id]) Object.assign(propertyState[id], s);
     });
+    if (typeof refreshAllPropertyBuildingVisuals === 'function') refreshAllPropertyBuildingVisuals();
     updatePlayerHud();
     if (GAME_CORE.winner !== null) rollBtn.disabled = true;
     console.info('[JORNADA][SYNC] estado aplicado. currentPlayerIdx agora =', currentPlayerIdx, '| isMyTurn() =', isMyTurn(), '| MY_TURN_SLOT =', MY_TURN_SLOT);
@@ -7220,6 +7355,7 @@ function restoreMatchFromSharedState(remote, playerCount) {
   } finally {
     applyingRemoteState = false;
   }
+  if (typeof refreshAllPropertyBuildingVisuals === 'function') refreshAllPropertyBuildingVisuals();
   gameState.phase = 'playing';
   gameState.paused = false;
   hideAllTableScreens();
