@@ -355,15 +355,16 @@
   <div class="panel">
     <h1>JORNADA <span>3D</span></h1>
     <p class="sub">um caminho através das eras</p>
-    <button class="menuBtn primary" id="btnPlayLocal">JOGAR LOCAL</button>
+    <button class="menuBtn primary" id="btnPlayLocal">JOGAR COM AMIGOS</button>
+    <button class="menuBtn" id="btnPlayVsMachine">JOGAR CONTRA A MÁQUINA</button>
     <button class="menuBtn" id="btnPlayOnline">JOGAR ONLINE</button>
   </div>
 </div>
 
-<!-- Configuração rápida do jogo LOCAL (sem mesa, senha ou lobby) -->
+<!-- Configuração rápida do jogo LOCAL com amigos (sem mesa, senha ou lobby) -->
 <div id="localSetupScreen" class="overlay hidden">
   <div class="panel">
-    <h2>JOGAR LOCAL</h2>
+    <h2>JOGAR COM AMIGOS</h2>
     <p class="sub">Escolha quantos jogadores neste dispositivo (2 a 6).</p>
     <div class="playerCountGrid" id="localPlayerCountGrid">
       <button class="countBtn localCountBtn" data-count="2">2</button>
@@ -4948,16 +4949,28 @@ function updatePlayerHud() {
   // MODO ONLINE: desabilita visualmente o botão de dados quando não é
   // a vez deste dispositivo (a validação real está no handler de clique).
   if (typeof MULTIPLAYER_ONLINE !== 'undefined' && MULTIPLAYER_ONLINE && typeof isMyTurn === 'function') {
-    rollBtn.disabled = rolling || !isMyTurn() || GAME_CORE.winner !== null;
+    const hostAuto = typeof canHostRunAutopilotForCurrent === 'function' && canHostRunAutopilotForCurrent();
+    rollBtn.disabled = rolling || (!isMyTurn() && !hostAuto) || GAME_CORE.winner !== null;
     // Não sobrescreve o texto quando este próprio updatePlayerHud() foi
     // chamado a partir da aplicação de um estado remoto — nesse caso o
     // resultado real dos dados já acabou de ser escrito e não deve ser
     // trocado por "Aguardando...".
     if (!applyingRemoteState) {
-      diceResultEl.textContent = isMyTurn() ? diceResultEl.textContent : `Aguardando ${p.name}…`;
+      if (isMyTurn()) { /* mantém texto atual */ }
+      else if (hostAuto) diceResultEl.textContent = `Piloto: ${p.name}…`;
+      else diceResultEl.textContent = `Aguardando ${p.name}…`;
+    }
+  } else if (typeof localGameMode !== 'undefined' && localGameMode === 'VS_MACHINE') {
+    // LOCAL vs máquina: humano não clica no turno da Máquina
+    const machineTurn = p && p.isMachine;
+    rollBtn.disabled = rolling || machineTurn || GAME_CORE.winner !== null;
+    if (!applyingRemoteState && machineTurn) {
+      diceResultEl.textContent = `Máquina jogando…`;
     }
   }
   updatePlayersPanel();
+  // Agenda turno do piloto (Host online ou Máquina local)
+  if (typeof tryScheduleAutopilotTurn === 'function') tryScheduleAutopilotTurn();
 }
 
 // Painel compacto de Galardões de todos os jogadores ativos (seção 6 do
@@ -4965,14 +4978,22 @@ function updatePlayerHud() {
 function updatePlayersPanel(opts) {
   playersPanelEl.innerHTML = '';
   players.forEach((p, i) => {
-    if (!p.active) return;
+    if (!p.active && !p.bankrupt) return;
     const row = document.createElement('div');
     row.className = 'miniPlayer' + (i === currentPlayerIdx ? ' current' : '');
     const dot = document.createElement('span');
     dot.className = 'dot';
     dot.style.background = '#' + p.color.toString(16).padStart(6, '0');
     const name = document.createElement('span');
-    name.textContent = p.name;
+    const slotKey = String(i + 1);
+    const pr = (typeof presenceBySlot !== 'undefined') ? presenceBySlot[slotKey] : null;
+    let statusTag = '';
+    if (p.bankrupt || (pr && pr.status === 'FALIDO')) statusTag = ' [FALIDO]';
+    else if (pr && pr.status === 'ARREBATADO') statusTag = ' [ARREBATADO]';
+    else if (pr && pr.status === 'DESCONECTADO') statusTag = ' [OFFLINE]';
+    else if (pr && pr.status === 'PILOTO_AUTOMATICO') statusTag = ' [AUTO]';
+    name.textContent = p.name + statusTag;
+    if (pr && pr.status === 'DESCONECTADO') name.style.opacity = '0.55';
     const g = document.createElement('span');
     g.className = 'g';
     g.textContent = formatGalardoes(p.galardoes);
@@ -5059,6 +5080,16 @@ function showEventModal(title, message, onContinue) {
   eventMessageEl.textContent = message;
   pendingEventCallback = onContinue;
   eventScreenEl.classList.remove('hidden');
+  // Piloto automático: fecha o modal sozinho (sem interação humana)
+  if (typeof isPlayerInAutopilot === 'function' && isPlayerInAutopilot(currentPlayerIdx)) {
+    setTimeout(() => {
+      if (eventScreenEl.classList.contains('hidden')) return;
+      eventScreenEl.classList.add('hidden');
+      const cb = pendingEventCallback;
+      pendingEventCallback = null;
+      if (cb) cb();
+    }, 700);
+  }
 }
 btnEventOk.addEventListener('click', () => {
   eventScreenEl.classList.add('hidden');
@@ -5079,6 +5110,11 @@ function transferGalardoes(fromPlayer, toPlayerOrNull, amount, reason) {
 // propriedades próprias não-hipotecadas até cobrir o valor; se ainda
 // assim insuficiente, decreta falência (prompt mestre, seção 17).
 function payObligation(player, amount, reason, creditor) {
+  if (player.galardoes >= amount) { transferGalardoes(player, creditor || null, amount, reason); return true; }
+  // Piloto: tenta vender construções antes de hipotecar (reusa sellBuilding)
+  if (typeof raiseAutopilotFunds === 'function' && typeof isPlayerInAutopilot === 'function' && isPlayerInAutopilot(player.id)) {
+    raiseAutopilotFunds(player, amount);
+  }
   if (player.galardoes >= amount) { transferGalardoes(player, creditor || null, amount, reason); return true; }
   const mortgageable = player.properties.filter((id) => !propertyState[id].mortgaged);
   for (const id of mortgageable) {
@@ -5101,6 +5137,10 @@ function declareBankruptcy(player) {
   player.properties = [];
   if (player.mesh.parent) boardGroup.remove(player.mesh);
   showGalardaoToast(`${player.name} foi eliminado economicamente.`);
+  // Presença: FALIDO (não altera regra econômica — só reflete no canal de presença)
+  if (typeof setMyPresenceStatus === 'function' && player.id === currentPlayerIdx) {
+    setMyPresenceStatus('FALIDO');
+  }
   updatePlayersPanel();
   checkVictory();
 }
@@ -5264,23 +5304,40 @@ function resolveSpace(player, done) {
       if (st.owner === null) {
         const price = GAME_RULES.propertyPrices[player.currentSpace];
         if (player.galardoes >= price) {
-          showActionPanel(`${s.name} — ${price} G para comprar.`, [
-            { label: `Comprar (${price} G)`, onClick: () => { buyProperty(player, player.currentSpace); hideActionPanel(); done(); } },
-            { label: 'Não comprar', onClick: () => {
-              if (typeof broadcastGameEvent === 'function') {
-                broadcastGameEvent(makeGameEvent('PROPERTY_DECLINED', {
-                  playerIndex: player.id, spaceId: player.currentSpace,
-                }));
-              }
-              hideActionPanel(); done();
-            } }
-          ]);
+          // Piloto decide compra automaticamente (sem painel)
+          if (typeof isPlayerInAutopilot === 'function' && isPlayerInAutopilot(player.id)) {
+            if (typeof shouldAutopilotBuy === 'function' && shouldAutopilotBuy(player, player.currentSpace, price)) {
+              buyProperty(player, player.currentSpace);
+            } else if (typeof broadcastGameEvent === 'function') {
+              broadcastGameEvent(makeGameEvent('PROPERTY_DECLINED', {
+                playerIndex: player.id, spaceId: player.currentSpace,
+              }));
+            }
+            done();
+          } else {
+            showActionPanel(`${s.name} — ${price} G para comprar.`, [
+              { label: `Comprar (${price} G)`, onClick: () => { buyProperty(player, player.currentSpace); hideActionPanel(); done(); } },
+              { label: 'Não comprar', onClick: () => {
+                if (typeof broadcastGameEvent === 'function') {
+                  broadcastGameEvent(makeGameEvent('PROPERTY_DECLINED', {
+                    playerIndex: player.id, spaceId: player.currentSpace,
+                  }));
+                }
+                hideActionPanel(); done();
+              } }
+            ]);
+          }
         } else {
           showGalardaoToast(`${s.name}: Galardões insuficientes para comprar.`);
           done();
         }
       } else if (st.owner === player.id) {
-        renderOwnPropertyActions(player, player.currentSpace, done);
+        // Piloto v1.0: não constrói — só finaliza
+        if (typeof isPlayerInAutopilot === 'function' && isPlayerInAutopilot(player.id)) {
+          done();
+        } else {
+          renderOwnPropertyActions(player, player.currentSpace, done);
+        }
       } else {
         const owner = players[st.owner];
         if (st.mortgaged) {
@@ -5377,15 +5434,12 @@ function resolveSpace(player, done) {
    ====================================================================== */
 let lastDiceRoll = null; // { dice1Value, dice2Value, diceTotal } — resultado real, para o estado compartilhado
 
-rollBtn.addEventListener('click', () => {
+function beginCurrentPlayerTurn() {
   if (rolling || gameState.phase !== 'playing' || gameState.paused || GAME_CORE.winner !== null) return;
-  // MODO ONLINE: só o dispositivo do jogador da vez pode agir (seção 24
-  // do prompt mestre — não confiar apenas em esconder botões, mas aqui
-  // ao menos garantimos que o próprio cliente não dispara ações fora
-  // do seu turno; a validação definitiva do lado do servidor fica
-  // documentada como próximo passo, ver bloco de mesas ao final).
-  if (typeof isMyTurn === 'function' && !isMyTurn()) {
-    showGalardaoToast('Aguarde sua vez — não é o seu turno.');
+  // MODO ONLINE: só o dono do turno OU o Host executando piloto do ausente
+  const autopilotHost = typeof canHostRunAutopilotForCurrent === 'function' && canHostRunAutopilotForCurrent();
+  if (typeof isMyTurn === 'function' && !isMyTurn() && !autopilotHost) {
+    if (!autopilotHost) showGalardaoToast('Aguarde sua vez — não é o seu turno.');
     return;
   }
   const player = players[currentPlayerIdx];
@@ -5495,6 +5549,18 @@ rollBtn.addEventListener('click', () => {
       });
     });
   });
+}
+
+rollBtn.addEventListener('click', () => {
+  // LOCAL VS_MACHINE: não permitir clique humano no turno da Máquina
+  if (typeof localGameMode !== 'undefined' && localGameMode === 'VS_MACHINE') {
+    const cur = players[currentPlayerIdx];
+    if (cur && cur.isMachine) {
+      showGalardaoToast('Aguarde — a Máquina está jogando.');
+      return;
+    }
+  }
+  beginCurrentPlayerTurn();
 });
 
 resetViewBtn.addEventListener('click', () => focusOnBoard());
@@ -5874,6 +5940,10 @@ const LocalTableStore = (() => {
     },
     async pushGameEvent(_tableId, _event) { return; },
     onGameEventChange(_tableId, _cb) { return () => {}; },
+    // Presença local: só em memória (sem Firebase)
+    async getPresence(_tableId, _slot) { return null; },
+    async setPresence(_tableId, _slot, _data) { return; },
+    onPresenceChange(_tableId, _cb) { return () => {}; },
   };
 })();
 
@@ -6051,6 +6121,40 @@ const FirebaseTableStore = (() => {
         const { ref, onValue } = firebaseDb._api;
         stopFn = onValue(ref(db, 'tables/' + tableId + '/lastEvent'), (snap) => {
           if (snap.exists()) cb(snap.val());
+        });
+      })();
+      return () => { cancelled = true; stopFn(); };
+    },
+    // Presença separada de gameState: tables/{id}/presence/{slot}
+    async getPresence(tableId, slot) {
+      const db = await apiOrThrow();
+      const { ref, get } = firebaseDb._api;
+      if (typeof get !== 'function') return null;
+      const snap = await get(ref(db, 'tables/' + tableId + '/presence/' + String(slot)));
+      return snap.exists() ? snap.val() : null;
+    },
+    async setPresence(tableId, slot, data) {
+      const db = await apiOrThrow();
+      const { ref, set, runTransaction } = firebaseDb._api;
+      // Estados terminais no Firebase NUNCA são sobrescritos por ATIVO/DESCONECTADO
+      if (data && (data.status === 'ATIVO' || data.status === 'DESCONECTADO') && typeof runTransaction === 'function') {
+        await runTransaction(ref(db, 'tables/' + tableId + '/presence/' + String(slot)), (cur) => {
+          if (cur && (cur.status === 'ARREBATADO' || cur.status === 'FALIDO')) return cur;
+          return data;
+        });
+        return;
+      }
+      await set(ref(db, 'tables/' + tableId + '/presence/' + String(slot)), data);
+    },
+    onPresenceChange(tableId, cb) {
+      let stopFn = () => {};
+      let cancelled = false;
+      (async () => {
+        const db = await ensureFirebase().catch(() => null);
+        if (!db || cancelled) return;
+        const { ref, onValue } = firebaseDb._api;
+        stopFn = onValue(ref(db, 'tables/' + tableId + '/presence'), (snap) => {
+          cb(snap.exists() ? (snap.val() || {}) : {});
         });
       })();
       return () => { cancelled = true; stopFn(); };
@@ -6419,6 +6523,273 @@ let unsubscribeGameState = null;
 let applyingRemoteState = false;
 let broadcastTimer = null;
 
+/* ---- Presença / heartbeat (separado de gameState) ----
+   tables/{tableId}/presence/{slot}
+   Estados: ATIVO | DESCONECTADO | PILOTO_AUTOMATICO | ARREBATADO | FALIDO
+   PILOTO_AUTOMATICO só estruturado — sem controle automático nesta etapa. */
+const PRESENCE_HEARTBEAT_MS = 30000;
+const PRESENCE_OFFLINE_MS = 120000; // ~2 min sem heartbeat → DESCONECTADO
+let presenceBySlot = {};
+let presenceHeartbeatTimer = null;
+let presenceCheckTimer = null;
+let unsubscribePresence = null;
+let myPresenceStatus = 'ATIVO'; // status que este cliente publica
+
+function stopPresenceSystem() {
+  if (presenceHeartbeatTimer) {
+    clearInterval(presenceHeartbeatTimer);
+    presenceHeartbeatTimer = null;
+  }
+  if (presenceCheckTimer) {
+    clearInterval(presenceCheckTimer);
+    presenceCheckTimer = null;
+  }
+  if (unsubscribePresence) {
+    unsubscribePresence();
+    unsubscribePresence = null;
+  }
+}
+
+async function writeMyPresence(status) {
+  if (!MULTIPLAYER_ONLINE || !gameState.tableId || !MY_TURN_SLOT) return;
+  if (typeof activeStore !== 'function' || typeof activeStore().setPresence !== 'function') return;
+  // Estados terminais locais: nunca regredir para ATIVO
+  if (myPresenceStatus === 'ARREBATADO' || myPresenceStatus === 'FALIDO') {
+    if (!status || status === 'ATIVO' || status === 'DESCONECTADO') return;
+  }
+  if (status) myPresenceStatus = status;
+  if (myPresenceStatus === 'ARREBATADO' || myPresenceStatus === 'FALIDO') {
+    // ok escrever o terminal
+  } else if (status === 'ATIVO' || !status) {
+    myPresenceStatus = 'ATIVO';
+  }
+  const payload = sanitizeForFirebase({
+    status: myPresenceStatus,
+    lastSeen: Date.now(),
+    clientId: CLIENT_ID,
+  });
+  try {
+    await activeStore().setPresence(gameState.tableId, MY_TURN_SLOT, payload);
+  } catch (e) {
+    console.warn('[JORNADA][PRESENCE] falha ao escrever', e);
+  }
+}
+
+function setMyPresenceStatus(status) {
+  // ARREBATADO / FALIDO são terminais: não permitem regressão
+  if ((myPresenceStatus === 'ARREBATADO' || myPresenceStatus === 'FALIDO') &&
+      (status === 'ATIVO' || status === 'DESCONECTADO')) {
+    return;
+  }
+  myPresenceStatus = status;
+  writeMyPresence(status);
+}
+
+function evaluatePresenceStatuses(map) {
+  const now = Date.now();
+  const source = map || presenceBySlot || {};
+  const next = {};
+  Object.keys(source).forEach((slot) => {
+    const raw = source[slot] || {};
+    let status = raw.status || 'ATIVO';
+    // Estados terminais não são recalculados pelo tempo
+    if (status !== 'ARREBATADO' && status !== 'FALIDO' && status !== 'PILOTO_AUTOMATICO') {
+      const last = typeof raw.lastSeen === 'number' ? raw.lastSeen : 0;
+      if (last > 0 && (now - last) >= PRESENCE_OFFLINE_MS) status = 'DESCONECTADO';
+      else status = (raw.status === 'DESCONECTADO' && last > 0 && (now - last) < PRESENCE_OFFLINE_MS)
+        ? 'ATIVO'
+        : (status === 'DESCONECTADO' ? 'DESCONECTADO' : 'ATIVO');
+      if (last > 0 && (now - last) < PRESENCE_OFFLINE_MS) status = 'ATIVO';
+      else if (last > 0) status = 'DESCONECTADO';
+    }
+    next[slot] = {
+      status: status,
+      lastSeen: raw.lastSeen || 0,
+      clientId: raw.clientId || null,
+    };
+  });
+  presenceBySlot = next;
+  if (typeof updatePlayersPanel === 'function' && gameState.phase === 'playing') {
+    updatePlayersPanel({ skipBroadcast: true });
+  }
+}
+
+function startPresenceSystem() {
+  stopPresenceSystem();
+  if (!MULTIPLAYER_ONLINE || !gameState.tableId || !MY_TURN_SLOT) return;
+  if (typeof activeStore !== 'function' || typeof activeStore().onPresenceChange !== 'function') return;
+
+  // Consulta presença já persistida ANTES de escrever ATIVO
+  // (impede sobrescrever ARREBATADO / FALIDO no reentrada).
+  (async () => {
+    let persisted = null;
+    try {
+      if (typeof activeStore().getPresence === 'function') {
+        persisted = await activeStore().getPresence(gameState.tableId, MY_TURN_SLOT);
+      }
+    } catch (e) {
+      console.warn('[JORNADA][PRESENCE] leitura inicial falhou', e);
+    }
+    const persistedStatus = persisted && persisted.status;
+    if (persistedStatus === 'ARREBATADO' || persistedStatus === 'FALIDO') {
+      myPresenceStatus = persistedStatus;
+      // Não escreve ATIVO; apenas reafirma o estado terminal se necessário
+      // (setPresence com ARREBATADO/FALIDO ainda é permitido).
+      await writeMyPresence(persistedStatus);
+    } else {
+      // DESCONECTADO / ATIVO / PILOTO_AUTOMATICO / ausente:
+      // retorno humano neste CLIENT_ID → ATIVO (PILOTO pode ser retomado)
+      myPresenceStatus = 'ATIVO';
+      await writeMyPresence('ATIVO');
+    }
+  })();
+
+  presenceHeartbeatTimer = setInterval(() => {
+    if (myPresenceStatus === 'ARREBATADO' || myPresenceStatus === 'FALIDO') return;
+    writeMyPresence('ATIVO');
+  }, PRESENCE_HEARTBEAT_MS);
+  unsubscribePresence = activeStore().onPresenceChange(gameState.tableId, (map) => {
+    evaluatePresenceStatuses(map || {});
+    // Se o Firebase ainda reportar terminal para o nosso slot, trava localmente
+    const mine = map && map[String(MY_TURN_SLOT)];
+    if (mine && (mine.status === 'ARREBATADO' || mine.status === 'FALIDO')) {
+      myPresenceStatus = mine.status;
+    }
+  });
+  presenceCheckTimer = setInterval(() => {
+    if (!MULTIPLAYER_ONLINE || !gameState.tableId) return;
+    evaluatePresenceStatuses(presenceBySlot);
+  }, 15000);
+}
+
+/* ======================================================================
+   PILOTO AUTOMÁTICO v1.0 — decisões automáticas sobre o motor existente.
+   Não cria motor paralelo. Só o Host (online) executa o turno do ausente.
+   ====================================================================== */
+const AUTOPILOT_CONFIG = {
+  // Custo provisório estimado de uma volta (ajustável — NÃO espalhar mágicos)
+  estimatedCostPerLap: 400,
+  goodLapsReserve: 2,      // BOA ≈ reserva para 2 voltas
+  moderateLapsReserve: 1,  // MODERADA ≈ 1 volta
+  // Fração máxima do caixa usada em compra (perfil)
+  conservadorMaxPriceFraction: 0.30,
+  agressivoMaxPriceFraction: 0.55,
+};
+
+function getAutopilotProfile(player) {
+  // Perfil estável por slot: pares CONSERVADOR, ímpares AGRESSIVO
+  if (player && player.autopilotProfile) return player.autopilotProfile;
+  const idx = player && typeof player.id === 'number' ? player.id : 0;
+  return (idx % 2 === 0) ? 'CONSERVADOR' : 'AGRESSIVO';
+}
+
+function isPlayerInAutopilot(playerOrIndex) {
+  const idx = (typeof playerOrIndex === 'number')
+    ? playerOrIndex
+    : (playerOrIndex && typeof playerOrIndex.id === 'number' ? playerOrIndex.id : -1);
+  if (idx < 0) return false;
+  // LOCAL VS_MACHINE: P2 (índice 1) é máquina o tempo todo
+  if (typeof localGameMode !== 'undefined' && localGameMode === 'VS_MACHINE') {
+    const p = players[idx];
+    if (p && p.isMachine) return true;
+  }
+  // ONLINE: presença DESCONECTADO / PILOTO_AUTOMATICO
+  const slot = String(idx + 1);
+  const pr = (typeof presenceBySlot !== 'undefined') ? presenceBySlot[slot] : null;
+  if (!pr) return false;
+  return pr.status === 'PILOTO_AUTOMATICO' || pr.status === 'DESCONECTADO';
+}
+
+// Quem pode executar o turno automático do jogador atual?
+// - ONLINE: somente o Host, para ausentes/piloto
+// - LOCAL VS_MACHINE: este dispositivo, para a máquina (P2)
+function canHostRunAutopilotForCurrent() {
+  if (!isPlayerInAutopilot(currentPlayerIdx)) return false;
+  if (typeof localGameMode !== 'undefined' && localGameMode === 'VS_MACHINE' && !MULTIPLAYER_ONLINE) {
+    return true;
+  }
+  if (!MULTIPLAYER_ONLINE) return false;
+  if (typeof isHostOfCurrentTable !== 'function' || !isHostOfCurrentTable()) return false;
+  return true;
+}
+
+function calculateFinancialHealth(player) {
+  // PROVISÓRIO / CONFIGURÁVEL — não é fórmula definitiva de "duas voltas"
+  const goodNeed = AUTOPILOT_CONFIG.estimatedCostPerLap * AUTOPILOT_CONFIG.goodLapsReserve;
+  const modNeed = AUTOPILOT_CONFIG.estimatedCostPerLap * AUTOPILOT_CONFIG.moderateLapsReserve;
+  const g = player.galardoes || 0;
+  if (g >= goodNeed) return 'BOA';
+  if (g >= modNeed) return 'MODERADA';
+  return 'CRITICA';
+}
+
+function shouldAutopilotBuy(player, spaceId, price) {
+  if (player.galardoes < price) return false;
+  const health = calculateFinancialHealth(player);
+  if (health === 'CRITICA') return false;
+  if (health === 'BOA') return true;
+  // MODERADA: depende do perfil
+  const profile = getAutopilotProfile(player);
+  const frac = price / Math.max(1, player.galardoes);
+  if (profile === 'AGRESSIVO') return frac <= AUTOPILOT_CONFIG.agressivoMaxPriceFraction;
+  return frac <= AUTOPILOT_CONFIG.conservadorMaxPriceFraction;
+}
+
+function raiseAutopilotFunds(player, amountNeeded) {
+  // Vende construções das propriedades mais baratas primeiro (reusa sellBuilding)
+  const owned = (player.properties || []).slice().filter((id) => propertyState[id] && propertyState[id].level > 0);
+  owned.sort((a, b) => (GAME_RULES.propertyPrices[a] || 0) - (GAME_RULES.propertyPrices[b] || 0));
+  for (const id of owned) {
+    if (player.galardoes >= amountNeeded) break;
+    while (propertyState[id].level > 0 && player.galardoes < amountNeeded) {
+      if (!sellBuilding(player, id)) break;
+    }
+  }
+}
+
+let autopilotScheduleTimer = null;
+function tryScheduleAutopilotTurn() {
+  if (autopilotScheduleTimer) {
+    clearTimeout(autopilotScheduleTimer);
+    autopilotScheduleTimer = null;
+  }
+  if (!canHostRunAutopilotForCurrent()) return;
+  if (rolling || gameState.phase !== 'playing' || gameState.paused || GAME_CORE.winner !== null) return;
+  autopilotScheduleTimer = setTimeout(() => {
+    autopilotScheduleTimer = null;
+    if (!canHostRunAutopilotForCurrent()) return;
+    if (rolling || gameState.phase !== 'playing') return;
+    executeAutopilotTurn();
+  }, 900);
+}
+
+async function promoteCurrentToAutopilotIfNeeded() {
+  if (!canHostRunAutopilotForCurrent()) return;
+  const slot = String(currentPlayerIdx + 1);
+  const pr = presenceBySlot[slot];
+  if (!pr || pr.status !== 'DESCONECTADO') return;
+  if (typeof activeStore !== 'function' || typeof activeStore().setPresence !== 'function') return;
+  try {
+    await activeStore().setPresence(gameState.tableId, slot, sanitizeForFirebase({
+      status: 'PILOTO_AUTOMATICO',
+      lastSeen: pr.lastSeen || Date.now(),
+      clientId: pr.clientId || null,
+      profile: getAutopilotProfile(players[currentPlayerIdx]),
+    }));
+    presenceBySlot[slot] = Object.assign({}, pr, { status: 'PILOTO_AUTOMATICO' });
+  } catch (e) {
+    console.warn('[JORNADA][PILOTO] falha ao promover', e);
+  }
+}
+
+async function executeAutopilotTurn() {
+  await promoteCurrentToAutopilotIfNeeded();
+  const p = players[currentPlayerIdx];
+  if (!p || !p.active || p.bankrupt) return;
+  showGalardaoToast(`Piloto automático joga por ${p.name} (${getAutopilotProfile(p)})`);
+  beginCurrentPlayerTurn();
+}
+
 // CORREÇÃO (bug do turno travado): o Firebase Realtime Database recusa
 // TOTALMENTE qualquer escrita que contenha `undefined` em qualquer campo,
 // em qualquer profundidade — e aborta a escrita inteira, não só o campo
@@ -6758,6 +7129,7 @@ function enterBoardFromTable(t) {
   if (typeof unsubscribeGameEvent !== 'undefined' && unsubscribeGameEvent) {
     unsubscribeGameEvent(); unsubscribeGameEvent = null;
   }
+  if (typeof stopPresenceSystem === 'function') stopPresenceSystem();
   if (MULTIPLAYER_ONLINE) {
     unsubscribeGameState = activeStore().onGameStateChange(gameState.tableId, applyRemoteSharedState);
     if (typeof activeStore().onGameEventChange === 'function') {
@@ -6769,6 +7141,10 @@ function enterBoardFromTable(t) {
   // Reaproveita 100% o motor e o tabuleiro 3D já existentes — nenhuma
   // regra, geometria ou animação foi duplicada para o modo mesa/online.
   startMatch(t.maxPlayers);
+  // Presença/heartbeat só no ONLINE (após MY_TURN_SLOT definido)
+  if (MULTIPLAYER_ONLINE && typeof startPresenceSystem === 'function') {
+    startPresenceSystem();
+  }
 }
 
 
@@ -6782,10 +7158,12 @@ function goToHomeScreen() {
   gameState.tableId = null;
   MULTIPLAYER_ONLINE = false;
   MY_TURN_SLOT = null;
+  localGameMode = null;
   if (unsubscribeGameState) { unsubscribeGameState(); unsubscribeGameState = null; }
   if (typeof unsubscribeGameEvent !== 'undefined' && unsubscribeGameEvent) {
     unsubscribeGameEvent(); unsubscribeGameEvent = null;
   }
+  if (typeof stopPresenceSystem === 'function') stopPresenceSystem();
   if (unsubscribeTables) { unsubscribeTables(); unsubscribeTables = null; }
   hideAllTableScreens();
   homeScreen.classList.remove('hidden');
@@ -6817,6 +7195,9 @@ function goToTableListScreen() {
   renderTableList(currentTablesSnapshot);
 }
 
+/** Modo local: 'AMIGOS' | 'VS_MACHINE' | null (online/outros) */
+let localGameMode = null;
+
 /** Inicia partida LOCAL direta (sem mesa, senha, lobby ou Firebase). */
 function startLocalMatch(count) {
   ACTIVE_MODE = 'local';
@@ -6829,11 +7210,35 @@ function startLocalMatch(count) {
   if (typeof unsubscribeGameEvent !== 'undefined' && unsubscribeGameEvent) {
     unsubscribeGameEvent(); unsubscribeGameEvent = null;
   }
+  if (typeof stopPresenceSystem === 'function') stopPresenceSystem();
   if (unsubscribeTables) { unsubscribeTables(); unsubscribeTables = null; }
+  // Padrão amigos, salvo se startLocalVsMachine já definiu VS_MACHINE
+  if (localGameMode !== 'VS_MACHINE') localGameMode = 'AMIGOS';
+  // Limpa flags de máquina de partidas anteriores
+  players.forEach((p) => {
+    p.isMachine = false;
+    if (PLAYER_NAMES[p.id]) p.name = PLAYER_NAMES[p.id];
+  });
   startMatch(count);
 }
 
-// ---- Home: JOGAR LOCAL / JOGAR ONLINE ----
+/** LOCAL: 1 humano (P1) + 1 máquina (P2) via PILOTO_AUTOMATICO existente */
+function startLocalVsMachine() {
+  localGameMode = 'VS_MACHINE';
+  startLocalMatch(2);
+  if (players[0]) {
+    players[0].isMachine = false;
+    players[0].name = PLAYER_NAMES[0] || 'Jogador 1';
+  }
+  if (players[1]) {
+    players[1].isMachine = true;
+    players[1].name = 'Máquina';
+    players[1].autopilotProfile = 'AGRESSIVO';
+  }
+  updatePlayerHud();
+}
+
+// ---- Home: JOGAR COM AMIGOS / CONTRA A MÁQUINA / ONLINE ----
 btnPlayLocalEl.addEventListener('click', () => {
   selectedLocalPlayerCount = null;
   document.querySelectorAll('.localCountBtn').forEach((b) => b.classList.remove('selected'));
@@ -6842,11 +7247,18 @@ btnPlayLocalEl.addEventListener('click', () => {
   localSetupScreen.classList.remove('hidden');
   gameState.phase = 'local_setup';
 });
+const btnPlayVsMachineEl = el('btnPlayVsMachine');
+if (btnPlayVsMachineEl) {
+  btnPlayVsMachineEl.addEventListener('click', () => {
+    startLocalVsMachine();
+  });
+}
 btnPlayOnlineEl.addEventListener('click', () => {
   if (!FIREBASE_CONFIGURED) {
     showGalardaoToast('Configure o Firebase (ver LEIA-ME) para habilitar o modo online.');
     return;
   }
+  localGameMode = null;
   goToTableListScreen();
 });
 document.querySelectorAll('.localCountBtn').forEach((btn) => {
@@ -6859,6 +7271,7 @@ document.querySelectorAll('.localCountBtn').forEach((btn) => {
 });
 btnStartLocalJourneyEl.addEventListener('click', () => {
   if (!selectedLocalPlayerCount) return;
+  localGameMode = 'AMIGOS';
   startLocalMatch(selectedLocalPlayerCount);
 });
 btnBackFromLocalSetupEl.addEventListener('click', () => goToHomeScreen());
@@ -6910,7 +7323,14 @@ el('btnConfirmEnd').addEventListener('click', () => { confirmEndScreen.classList
 
 // ---- Confirmação: voltar à mesa/lobby ----
 el('btnKeepPlaying').addEventListener('click', () => confirmHomeScreen.classList.add('hidden'));
-el('btnConfirmHome').addEventListener('click', () => { confirmHomeScreen.classList.add('hidden'); endMatch(); });
+el('btnConfirmHome').addEventListener('click', () => {
+  confirmHomeScreen.classList.add('hidden');
+  // Saída voluntária da partida online → ARREBATADO (definitivo)
+  if (MULTIPLAYER_ONLINE && typeof setMyPresenceStatus === 'function') {
+    setMyPresenceStatus('ARREBATADO');
+  }
+  endMatch();
+});
 
 // Encerrar a partida: volta para o LOBBY da mesa (se ela ainda existir),
 // deixando a mesa pronta para uma nova rodada, ou para a lista de mesas
@@ -6927,6 +7347,7 @@ async function endMatch() {
   if (typeof unsubscribeGameEvent !== 'undefined' && unsubscribeGameEvent) {
     unsubscribeGameEvent(); unsubscribeGameEvent = null;
   }
+  if (typeof stopPresenceSystem === 'function') stopPresenceSystem();
   MULTIPLAYER_ONLINE = false;
 
   if (tableId && ACTIVE_MODE === 'online') {
