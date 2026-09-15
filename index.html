@@ -5567,11 +5567,14 @@ resetViewBtn.addEventListener('click', () => focusOnBoard());
 
 resetGameBtn.addEventListener('click', () => {
   if (gameState.phase !== 'playing') return;
-  if (typeof MULTIPLAYER_ONLINE !== 'undefined' && MULTIPLAYER_ONLINE && !isHostOfCurrentTable()) {
-    showGalardaoToast('AÇÃO NÃO PERMITIDA — apenas o Host pode reiniciar a partida.');
+  // Online: reinício local só com confirmação implícita do fluxo de mesa;
+  // não depende mais de Host. Evita reset acidental em partida compartilhada.
+  if (typeof MULTIPLAYER_ONLINE !== 'undefined' && MULTIPLAYER_ONLINE) {
+    showGalardaoToast('Reinício online desativado — a partida persiste na mesa.');
     return;
   }
   currentPlayerIdx = 0;
+  hideAllTableScreens();
   hideActionPanel();
   eventScreenEl.classList.add('hidden');
   activatePlayers(players.filter(p => p.active).length || GAME_RULES.minPlayers);
@@ -5944,6 +5947,8 @@ const LocalTableStore = (() => {
     async getPresence(_tableId, _slot) { return null; },
     async setPresence(_tableId, _slot, _data) { return; },
     onPresenceChange(_tableId, _cb) { return () => {}; },
+    async getGameState(_tableId) { return null; },
+    async tryClaimAutopilot(_tableId, _claim) { return true; },
   };
 })();
 
@@ -6133,6 +6138,34 @@ const FirebaseTableStore = (() => {
       const snap = await get(ref(db, 'tables/' + tableId + '/presence/' + String(slot)));
       return snap.exists() ? snap.val() : null;
     },
+    async getGameState(tableId) {
+      const db = await apiOrThrow();
+      const { ref, get } = firebaseDb._api;
+      if (typeof get !== 'function') return null;
+      const snap = await get(ref(db, 'tables/' + tableId + '/gameState'));
+      return snap.exists() ? snap.val() : null;
+    },
+    // Claim determinístico do piloto (evita dupla execução sob corrida)
+    async tryClaimAutopilot(tableId, claim) {
+      const db = await apiOrThrow();
+      const { ref, runTransaction } = firebaseDb._api;
+      const result = await runTransaction(ref(db, 'tables/' + tableId + '/autopilotClaim'), (cur) => {
+        const now = Date.now();
+        // Claim ativo recente do mesmo turno: só o mesmo executor mantém
+        if (cur && cur.playerIndex === claim.playerIndex && cur.turnToken === claim.turnToken) {
+          if (cur.executorClientId === claim.executorClientId) return cur;
+          // Outro já reivindicou este turno
+          if (cur.ts && (now - cur.ts) < 20000) return; // abort
+        }
+        // Claim expirado ou turno diferente → assume
+        if (cur && cur.ts && (now - cur.ts) < 20000 && cur.playerIndex === claim.playerIndex &&
+            cur.executorClientId !== claim.executorClientId) {
+          return; // abort — outro executor ativo
+        }
+        return claim;
+      });
+      return !!(result && result.committed);
+    },
     async setPresence(tableId, slot, data) {
       const db = await apiOrThrow();
       const { ref, set, runTransaction } = firebaseDb._api;
@@ -6284,11 +6317,11 @@ function buildTableCard(id, t) {
   for (let s = 1; s <= t.maxPlayers; s++) {
     const p = t.players[s];
     const chip = document.createElement('span');
-    chip.className = 'slotChip' + (p && p.clientId === t.hostClientId ? ' host' : '');
+    chip.className = 'slotChip';
     const dot = document.createElement('span'); dot.className = 'dot';
     chip.appendChild(dot);
     const label = p
-      ? ('P' + s + (p.clientId === t.hostClientId ? ' — HOST' : ' — JOGADOR'))
+      ? ('P' + s + ' — JOGADOR')
       : ('P' + s + ' — AGUARDANDO');
     chip.appendChild(document.createTextNode(label));
     slotsRow.appendChild(chip);
@@ -6463,7 +6496,8 @@ function renderLobby(t) {
   lobbyCountTextEl.textContent = `${filled} / ${t.maxPlayers} JOGADORES`;
 
   lobbySlotsEl.innerHTML = '';
-  const isHost = t.hostClientId === CLIENT_ID;
+  // Host não é mais autoridade da partida — qualquer membro pode iniciar
+  const iAmMember = Object.values(t.players || {}).some((p) => p.clientId === CLIENT_ID);
   for (let s = 1; s <= t.maxPlayers; s++) {
     const p = t.players[s];
     const row = document.createElement('div');
@@ -6472,12 +6506,12 @@ function renderLobby(t) {
     const nm = document.createElement('span'); nm.className = 'slotName';
     nm.textContent = p ? (p.name + (p.clientId === CLIENT_ID ? ' (você)' : '')) : 'AGUARDANDO';
     const tag = document.createElement('span');
-    tag.className = 'slotTag' + (p && p.clientId === t.hostClientId ? ' host' : '');
-    tag.textContent = p ? (p.clientId === t.hostClientId ? 'HOST' : 'JOGADOR') : '';
+    tag.className = 'slotTag';
+    tag.textContent = p ? 'JOGADOR' : '';
     row.append(idx, nm, tag);
     lobbySlotsEl.appendChild(row);
   }
-  btnStartFromLobbyEl.style.display = isHost ? 'block' : 'none';
+  btnStartFromLobbyEl.style.display = iAmMember ? 'block' : 'none';
   lobbyErrorEl.textContent = '';
 }
 
@@ -6700,8 +6734,31 @@ function isPlayerInAutopilot(playerOrIndex) {
   return pr.status === 'PILOTO_AUTOMATICO' || pr.status === 'DESCONECTADO';
 }
 
+/**
+ * Eleição circular determinística do executor do piloto.
+ * A partir do ausente, o próximo slot ATIVO/elegível no ciclo P1→…→P6→P1.
+ * Retorna índice 0-based do executor, ou -1 se ninguém elegível.
+ */
+function getCircularAutopilotExecutorIndex(absenteeIndex) {
+  const max = players.length;
+  for (let step = 1; step <= max; step++) {
+    const idx = (absenteeIndex + step) % max;
+    const p = players[idx];
+    if (!p || !p.active || p.bankrupt) continue;
+    const slot = String(idx + 1);
+    const pr = (typeof presenceBySlot !== 'undefined') ? presenceBySlot[slot] : null;
+    if (pr) {
+      if (pr.status === 'DESCONECTADO' || pr.status === 'PILOTO_AUTOMATICO') continue;
+      if (pr.status === 'ARREBATADO' || pr.status === 'FALIDO') continue;
+    }
+    // ATIVO ou sem presença registrada (tratado como elegível se ativo no motor)
+    return idx;
+  }
+  return -1;
+}
+
 // Quem pode executar o turno automático do jogador atual?
-// - ONLINE: somente o Host, para ausentes/piloto
+// - ONLINE: jogador eleito pela ordem circular (NÃO host)
 // - LOCAL VS_MACHINE: este dispositivo, para a máquina (P2)
 function canHostRunAutopilotForCurrent() {
   if (!isPlayerInAutopilot(currentPlayerIdx)) return false;
@@ -6709,8 +6766,10 @@ function canHostRunAutopilotForCurrent() {
     return true;
   }
   if (!MULTIPLAYER_ONLINE) return false;
-  if (typeof isHostOfCurrentTable !== 'function' || !isHostOfCurrentTable()) return false;
-  return true;
+  const executorIdx = getCircularAutopilotExecutorIndex(currentPlayerIdx);
+  if (executorIdx < 0) return false; // ninguém online → partida aguarda
+  const myIdx = MY_TURN_SLOT ? (parseInt(MY_TURN_SLOT, 10) - 1) : -1;
+  return myIdx === executorIdx;
 }
 
 function calculateFinancialHealth(player) {
@@ -6783,6 +6842,22 @@ async function promoteCurrentToAutopilotIfNeeded() {
 }
 
 async function executeAutopilotTurn() {
+  if (!canHostRunAutopilotForCurrent()) return;
+  // Claim no Firebase (online) para evitar dois clientes executando o mesmo turno
+  if (MULTIPLAYER_ONLINE && gameState.tableId && typeof activeStore().tryClaimAutopilot === 'function') {
+    const turnToken = String(currentPlayerIdx) + '_' + (lastDiceRoll && lastDiceRoll.diceTotal != null ? lastDiceRoll.diceTotal : 'x') + '_' + (players[currentPlayerIdx] && players[currentPlayerIdx].currentSpace);
+    const ok = await activeStore().tryClaimAutopilot(gameState.tableId, sanitizeForFirebase({
+      playerIndex: currentPlayerIdx,
+      executorClientId: CLIENT_ID,
+      executorSlot: MY_TURN_SLOT,
+      turnToken: turnToken,
+      ts: Date.now(),
+    }));
+    if (!ok) {
+      console.info('[JORNADA][PILOTO] claim negado — outro cliente já executa');
+      return;
+    }
+  }
   await promoteCurrentToAutopilotIfNeeded();
   const p = players[currentPlayerIdx];
   if (!p || !p.active || p.bankrupt) return;
@@ -7109,14 +7184,60 @@ function startMatch(count) {
   focusOnBoard();
 }
 
-function enterBoardFromTable(t) {
+/**
+ * Restaura partida a partir de gameState já existente no Firebase.
+ * NÃO zera turno, posições, Galardões nem propriedades.
+ */
+function restoreMatchFromSharedState(remote, playerCount) {
+  const count = playerCount || (remote.players && remote.players.length) || GAME_RULES.minPlayers;
+  // Ativa slots sem resetar economia via activatePlayers (que zera tudo)
+  players.forEach((p, i) => {
+    p.active = i < count;
+    if (p.active && !p.mesh.parent) boardGroup.add(p.mesh);
+    if (!p.active && p.mesh.parent) boardGroup.remove(p.mesh);
+  });
+  applyingRemoteState = true;
+  try {
+    if (typeof remote.currentPlayerIdx === 'number') currentPlayerIdx = remote.currentPlayerIdx;
+    GAME_CORE.winner = (remote.winner === undefined) ? null : remote.winner;
+    if (remote.diceTotal !== null && remote.diceTotal !== undefined) {
+      const isDouble = remote.dice1Value === remote.dice2Value;
+      lastDiceRoll = { dice1Value: remote.dice1Value, dice2Value: remote.dice2Value, diceTotal: remote.diceTotal };
+      diceResultEl.innerHTML = `${remote.dice1Value} + ${remote.dice2Value} = <b>${remote.diceTotal}</b>${isDouble ? ' (dados iguais)' : ''}`;
+    }
+    (remote.players || []).forEach((rp, i) => {
+      const p = players[i];
+      if (!p || !rp) return;
+      Object.assign(p, rp, { properties: (rp.properties || []).slice() });
+      if (p.active && !p.mesh.parent) boardGroup.add(p.mesh);
+      if (!p.active && p.mesh.parent) boardGroup.remove(p.mesh);
+      const s = boardSpaces[p.currentSpace];
+      if (s) p.mesh.position.set(s.position.x, s.position.y + SPACE_HEIGHT / 2, s.position.z);
+    });
+    Object.entries(remote.properties || {}).forEach(([id, s]) => {
+      if (propertyState[id]) Object.assign(propertyState[id], s);
+    });
+  } finally {
+    applyingRemoteState = false;
+  }
+  gameState.phase = 'playing';
+  gameState.paused = false;
+  hideAllTableScreens();
+  pauseScreen.classList.add('hidden');
+  menuPanel.classList.add('hidden');
+  rollBtn.disabled = false;
+  showGameChrome(true);
+  updatePlayerHud();
+  focusOnBoard();
+  console.info('[JORNADA][SYNC] partida EXISTENTE restaurada — turno', currentPlayerIdx);
+}
+
+async function enterBoardFromTable(t) {
   hideAllTableScreens();
   gameState.phase = 'playing';
   MULTIPLAYER_ONLINE = (ACTIVE_MODE === 'online');
   const mySlot = Object.keys(t.players).find((s) => t.players[s].clientId === CLIENT_ID);
   MY_TURN_SLOT = mySlot || null;
-  // DIAGNÓSTICO (temporário, não altera comportamento): mostra no
-  // console exatamente qual slot este dispositivo pensa que é o seu.
   console.info('[JORNADA][SYNC] entrei na mesa', {
     tableId: gameState.tableId,
     CLIENT_ID,
@@ -7138,10 +7259,25 @@ function enterBoardFromTable(t) {
     console.info('[JORNADA][SYNC] listeners gameState + lastEvent conectados para a mesa', gameState.tableId);
   }
 
-  // Reaproveita 100% o motor e o tabuleiro 3D já existentes — nenhuma
-  // regra, geometria ou animação foi duplicada para o modo mesa/online.
-  startMatch(t.maxPlayers);
-  // Presença/heartbeat só no ONLINE (após MY_TURN_SLOT definido)
+  // RECUPERAÇÃO SEGURA: se já existe gameState, NÃO chama startMatch()
+  let existing = null;
+  if (MULTIPLAYER_ONLINE && typeof activeStore().getGameState === 'function') {
+    try {
+      existing = await activeStore().getGameState(gameState.tableId);
+    } catch (e) {
+      console.warn('[JORNADA][SYNC] leitura de gameState falhou', e);
+    }
+  }
+  const hasExisting = existing && Array.isArray(existing.players) && existing.players.length > 0
+    && typeof existing.currentPlayerIdx === 'number';
+
+  if (hasExisting) {
+    restoreMatchFromSharedState(existing, t.maxPlayers);
+  } else {
+    // Nova partida — único caso em que startMatch zera o estado
+    startMatch(t.maxPlayers);
+  }
+
   if (MULTIPLAYER_ONLINE && typeof startPresenceSystem === 'function') {
     startPresenceSystem();
   }
