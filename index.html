@@ -252,8 +252,17 @@
   }
   .slotChip.host{ color:var(--gold); border-color:rgba(201,163,91,0.5); }
   .slotChip .dot{ width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7; }
-  .tableCard .rowActions{ display:flex; gap:8px; }
+  .tableCard .rowActions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   .tableCard .rowActions .menuBtn{ width:auto; flex:1; padding:9px 12px; font-size:0.82rem; }
+  .tableCard{ position:relative; }
+  .tableCard .btnDeleteX{
+    position:absolute; top:10px; right:10px; z-index:2;
+    width:32px; height:32px; flex:none; border-radius:9px; border:1px solid rgba(192,69,60,0.65);
+    background:rgba(192,69,60,0.22); color:#ff8a80; font-size:1.25rem; font-weight:700;
+    cursor:pointer; display:flex; align-items:center; justify-content:center; line-height:1;
+    padding:0;
+  }
+  .tableCard .btnDeleteX:hover{ background:rgba(192,69,60,0.4); border-color:#c0453c; color:#fff; }
   .tableFullTag{
     align-self:flex-start; font-size:0.7rem; letter-spacing:0.08em; color:#e8a29c;
     border:1px solid rgba(192,69,60,0.4); border-radius:8px; padding:3px 9px;
@@ -6144,15 +6153,20 @@ const LocalTableStore = (() => {
       writeAll(tables);
       return tableId;
     },
-    async deleteTable(tableId, password) {
+    async deleteTable(tableId, password, opts) {
+      opts = opts || {};
       const tables = readAll();
       const t = tables[tableId];
       if (!t) throw new Error('MESA NÃO ENCONTRADA');
-      if (password && t.password && t.password !== password) throw new Error('SENHA INCORRETA');
-      if (Object.keys(t.players || {}).length > 0) throw new Error('Há jogadores na mesa — exclusão não permitida.');
+      const isMaster = password === '2525' || opts.isMaster;
+      if (!isMaster && password && t.password && t.password !== password) throw new Error('SENHA INCORRETA');
+      if (!opts.allowOccupiedSlots && Object.keys(t.players || {}).length > 0) {
+        throw new Error('Há jogadores na mesa — exclusão não permitida.');
+      }
       tables[tableId] = emptyTable(tableId);
       writeAll(tables);
     },
+    async getPresenceMap(_tableId) { return {}; },
     async leaveTable(tableId) {
       const tables = readAll();
       const t = tables[tableId];
@@ -6326,20 +6340,29 @@ const FirebaseTableStore = (() => {
       if (errorMsg) throw new Error(errorMsg);
       return tableId;
     },
-    async deleteTable(tableId, password) {
+    async deleteTable(tableId, password, opts) {
+      opts = opts || {};
       const db = await apiOrThrow();
       const { ref, runTransaction } = firebaseDb._api;
-      // Transação: senha + mesa sem jogadores
+      const isMaster = password === '2525' || opts.isMaster;
+      // Presença ATIVA é validada no cliente antes; aqui remove a mesa
+      // (slots fantasma de ARREBATADO não impedem exclusão).
       const result = await runTransaction(ref(db, 'tables/' + tableId), (t) => {
         if (!t) return null;
-        if (password && t.password && t.password !== password) return; // abort → senha
-        if (Object.keys(normalizePlayers(t.players)).length > 0) return; // abort → ocupada
-        return null; // remove atomicamente
+        if (!isMaster && password && t.password && t.password !== password) return;
+        if (!opts.allowOccupiedSlots && Object.keys(normalizePlayers(t.players)).length > 0) return;
+        return null;
       });
       if (!result.committed) {
-        // Diferencia mensagem se possível
-        throw new Error('AÇÃO NÃO PERMITIDA — verifique a senha e se a mesa está vazia.');
+        throw new Error('AÇÃO NÃO PERMITIDA — verifique a senha e se há alguém ativo na mesa.');
       }
+    },
+    async getPresenceMap(tableId) {
+      const db = await apiOrThrow();
+      const { ref, get } = firebaseDb._api;
+      if (typeof get !== 'function') return {};
+      const snap = await get(ref(db, 'tables/' + tableId + '/presence'));
+      return snap.exists() ? (snap.val() || {}) : {};
     },
     async leaveTable(tableId) {
       const db = await apiOrThrow();
@@ -6549,8 +6572,12 @@ function makeSmallBtn(label, onClick, danger) {
   return b;
 }
 
+/** Senha mestra: excluir mesa vazia (sem presença ATIVA) e observar partida. */
+const MASTER_PASSWORD = '2525';
+let IS_OBSERVER = false;
+
 function buildTableCard(id, t) {
-  const filled = Object.keys(t.players).length;
+  const filled = Object.keys(t.players || {}).length;
   const isFull = filled >= t.maxPlayers;
 
   const card = document.createElement('div');
@@ -6580,25 +6607,69 @@ function buildTableCard(id, t) {
   }
   card.appendChild(slotsRow);
 
-  if (isFull) {
+  if (t.status === 'playing') {
+    const tag = document.createElement('span'); tag.className = 'tableFullTag';
+    tag.textContent = 'EM PARTIDA';
+    tag.style.color = 'var(--gold)';
+    tag.style.borderColor = 'rgba(201,163,91,0.45)';
+    card.appendChild(tag);
+  } else if (isFull) {
     const tag = document.createElement('span'); tag.className = 'tableFullTag'; tag.textContent = 'LOTADA';
     card.appendChild(tag);
   }
 
+  // X vermelho no canto do card — exclusão exige senha (mesa ou mestra 2525) + ninguém ATIVO
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'btnDeleteX';
+  delBtn.title = 'Excluir mesa (senha)';
+  delBtn.setAttribute('aria-label', 'Excluir mesa');
+  delBtn.textContent = '×';
+  delBtn.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    deleteTableFlow(id);
+  });
+  card.appendChild(delBtn);
+
   const actions = document.createElement('div');
   actions.className = 'rowActions';
-  const isMember = Object.values(t.players).some((p) => p.clientId === CLIENT_ID);
+  const isMember = Object.values(t.players || {}).some((p) => p.clientId === CLIENT_ID);
   if (isMember) {
     actions.appendChild(makeSmallBtn('ABRIR MESA', () => enterLobbyDirectly(id)));
+  } else if (t.status === 'playing') {
+    actions.appendChild(makeSmallBtn('OBSERVAR', () => openObserveModal(id, t)));
   } else if (!isFull) {
     actions.appendChild(makeSmallBtn('ENTRAR', () => openJoinModal(id, t)));
-  }
-  if (filled === 0) {
-    actions.appendChild(makeSmallBtn('EXCLUIR MESA', () => deleteTableFlow(id), true));
   }
   if (actions.children.length) card.appendChild(actions);
 
   return card;
+}
+
+async function tableHasActivePresence(tableId) {
+  try {
+    if (typeof activeStore === 'function' && typeof activeStore().getPresenceMap === 'function') {
+      const map = await activeStore().getPresenceMap(tableId);
+      if (!map) return false;
+      const now = Date.now();
+      const offlineMs = (typeof PRESENCE_OFFLINE_MS === 'number') ? PRESENCE_OFFLINE_MS : 45000;
+      return Object.keys(map).some((s) => {
+        const pr = map[s];
+        if (!pr) return false;
+        // Só ATIVO recente bloqueia exclusão (ARREBATADO/FALIDO/DESCONECTADO/stale não)
+        if (pr.status !== 'ATIVO') return false;
+        const last = typeof pr.lastSeen === 'number' ? pr.lastSeen : 0;
+        if (last > 0 && (now - last) >= offlineMs) return false;
+        return true;
+      });
+    }
+  } catch (e) {
+    console.warn('[JORNADA] leitura de presença para exclusão falhou', e);
+  }
+  if (gameState.tableId === tableId && typeof presenceBySlot !== 'undefined') {
+    return Object.keys(presenceBySlot).some((s) => presenceBySlot[s] && presenceBySlot[s].status === 'ATIVO');
+  }
+  return false;
 }
 
 async function deleteTableFlow(id) {
@@ -6607,46 +6678,78 @@ async function deleteTableFlow(id) {
     showGalardaoToast('MESA NÃO ENCONTRADA');
     return;
   }
-  const pass = window.prompt('Digite a senha de 4 dígitos da mesa para excluir:');
-  if (pass == null) return; // cancelou
+  const pass = window.prompt('Senha da mesa (4 dígitos) ou senha mestra:');
+  if (pass == null) return;
   const password = String(pass).replace(/\D/g, '').slice(0, 4);
   if (!/^\d{4}$/.test(password)) {
     showGalardaoToast('A senha deve ter exatamente 4 números.');
     return;
   }
-  if (t.password && t.password !== password) {
+  const isMaster = password === MASTER_PASSWORD;
+  if (!isMaster && t.password && t.password !== password) {
     showGalardaoToast('SENHA INCORRETA');
     return;
   }
-  const filled = Object.keys(t.players || {}).length;
-  if (filled > 0) {
-    showGalardaoToast('Há jogadores na mesa — exclusão não permitida.');
+  // Critério real: presença ATIVA (não slot fantasma de quem abandonou)
+  const hasActive = await tableHasActivePresence(id);
+  if (hasActive) {
+    showGalardaoToast('Há jogador ativo na mesa — exclusão não permitida.');
     return;
   }
-  // Presença: se algum slot ainda estiver ATIVO, bloqueia
-  try {
-    if (typeof activeStore().getPresence === 'function') {
-      // getPresence é por slot; varremos slots 1..maxPlayers se houver API de mapa
-      // Usa snapshot local de presença se a mesa for a atual
-      if (gameState.tableId === id && presenceBySlot) {
-        const activePresence = Object.keys(presenceBySlot).some((s) => {
-          const pr = presenceBySlot[s];
-          return pr && pr.status === 'ATIVO';
-        });
-        if (activePresence) {
-          showGalardaoToast('Ainda há presença ativa na mesa.');
-          return;
-        }
-      }
-    }
-  } catch (e) { /* segue com delete por players vazios */ }
 
   try {
-    await activeStore().deleteTable(id, password);
+    await activeStore().deleteTable(id, password, { allowOccupiedSlots: true, isMaster: isMaster });
     showGalardaoToast('Mesa excluída.');
   } catch (e) {
     showGalardaoToast(e.message || 'AÇÃO NÃO PERMITIDA');
   }
+}
+
+function openObserveModal(id, t) {
+  pendingJoinTableId = id;
+  joinTableTitleEl.textContent = (t.name || 'Mesa') + ' — Observar';
+  joinPasswordEl.value = '';
+  joinTableErrorEl.textContent = 'Use a senha mestra (observador — não joga).';
+  joinTableModal.classList.remove('hidden');
+  joinTableModal.dataset.mode = 'observe';
+}
+
+/** Entra no tabuleiro só como observador (senha mestra). Sem slot, sem presença de jogador. */
+async function enterBoardAsObserver(t) {
+  IS_OBSERVER = true;
+  hideAllTableScreens();
+  gameState.phase = 'playing';
+  MULTIPLAYER_ONLINE = (ACTIVE_MODE === 'online');
+  MY_TURN_SLOT = null; // não joga
+  gameState.tableId = t.id || pendingJoinTableId;
+
+  if (unsubscribeGameState) { unsubscribeGameState(); unsubscribeGameState = null; }
+  if (typeof unsubscribeGameEvent !== 'undefined' && unsubscribeGameEvent) {
+    unsubscribeGameEvent(); unsubscribeGameEvent = null;
+  }
+  if (typeof stopPresenceSystem === 'function') stopPresenceSystem();
+
+  if (MULTIPLAYER_ONLINE) {
+    unsubscribeGameState = activeStore().onGameStateChange(gameState.tableId, applyRemoteSharedState);
+    if (typeof activeStore().onGameEventChange === 'function') {
+      unsubscribeGameEvent = activeStore().onGameEventChange(gameState.tableId, handleRemoteGameEvent);
+    }
+  }
+
+  let existing = null;
+  try {
+    if (typeof activeStore().getGameState === 'function') {
+      existing = await activeStore().getGameState(gameState.tableId);
+    }
+  } catch (e) {}
+  if (existing && Array.isArray(existing.players) && existing.players.length > 0) {
+    restoreMatchFromSharedState(existing, t.maxPlayers);
+  } else {
+    startMatch(t.maxPlayers || 2);
+  }
+  // Observador: não pode lançar dados
+  if (rollBtn) rollBtn.disabled = true;
+  showGalardaoToast('Modo observador — você só assiste.');
 }
 
 
@@ -6725,13 +6828,34 @@ function openJoinModal(id, t) {
   joinPasswordEl.value = '';
   joinTableErrorEl.textContent = '';
   joinTableModal.classList.remove('hidden');
+  delete joinTableModal.dataset.mode;
 }
-btnCancelJoinTableEl.addEventListener('click', () => joinTableModal.classList.add('hidden'));
+btnCancelJoinTableEl.addEventListener('click', () => {
+  joinTableModal.classList.add('hidden');
+  delete joinTableModal.dataset.mode;
+});
 
 btnConfirmJoinTableEl.addEventListener('click', async () => {
   const pass = joinPasswordEl.value.trim();
   if (!/^\d{4}$/.test(pass)) { joinTableErrorEl.textContent = 'Digite os 4 dígitos da senha.'; return; }
+  const mode = joinTableModal.dataset.mode;
+
+  // Observador: somente senha mestra; não ocupa slot de jogador
+  if (mode === 'observe') {
+    if (pass !== MASTER_PASSWORD) {
+      joinTableErrorEl.textContent = 'Senha mestra incorreta.';
+      return;
+    }
+    const t = currentTablesSnapshot[pendingJoinTableId];
+    if (!t) { joinTableErrorEl.textContent = 'MESA NÃO ENCONTRADA'; return; }
+    joinTableModal.classList.add('hidden');
+    delete joinTableModal.dataset.mode;
+    await enterBoardAsObserver(t);
+    return;
+  }
+
   try {
+    IS_OBSERVER = false;
     const id = await activeStore().joinTable(pendingJoinTableId, pass);
     joinTableModal.classList.add('hidden');
     await enterLobbyDirectly(id);
@@ -7218,8 +7342,9 @@ function sanitizeForFirebase(value) {
 }
 
 function isMyTurn() {
+  if (typeof IS_OBSERVER !== 'undefined' && IS_OBSERVER) return false; // observador nunca joga
   if (!MULTIPLAYER_ONLINE) return true; // modo local: qualquer clique é válido (um dispositivo controla todos)
-  if (!MY_TURN_SLOT) return false; // espectador — não deveria acontecer, mas por segurança nega a ação
+  if (!MY_TURN_SLOT) return false; // espectador / sem slot
   return (parseInt(MY_TURN_SLOT, 10) - 1) === currentPlayerIdx;
 }
 function isHostOfCurrentTable() {
@@ -7596,6 +7721,7 @@ async function enterBoardFromTable(t) {
   hideAllTableScreens();
   gameState.phase = 'playing';
   MULTIPLAYER_ONLINE = (ACTIVE_MODE === 'online');
+  IS_OBSERVER = false;
   const mySlot = Object.keys(t.players).find((s) => t.players[s].clientId === CLIENT_ID);
   MY_TURN_SLOT = mySlot || null;
   console.info('[JORNADA][SYNC] entrei na mesa', {
@@ -7654,6 +7780,7 @@ function goToHomeScreen() {
   gameState.tableId = null;
   MULTIPLAYER_ONLINE = false;
   MY_TURN_SLOT = null;
+  IS_OBSERVER = false;
   localGameMode = null;
   if (unsubscribeGameState) { unsubscribeGameState(); unsubscribeGameState = null; }
   if (typeof unsubscribeGameEvent !== 'undefined' && unsubscribeGameEvent) {
