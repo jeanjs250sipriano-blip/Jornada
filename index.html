@@ -5333,10 +5333,51 @@ function declareBankruptcy(player) {
   if (player.mesh.parent) boardGroup.remove(player.mesh);
   showGalardaoToast(`${player.name} foi eliminado economicamente.`);
   // Presença: FALIDO (não altera regra econômica — só reflete no canal de presença)
-  if (typeof setMyPresenceStatus === 'function' && player.id === currentPlayerIdx) {
-    setMyPresenceStatus('FALIDO');
+  if (typeof setMyPresenceStatus === 'function' && typeof MY_TURN_SLOT !== 'undefined' && MY_TURN_SLOT) {
+    const myIdx = parseInt(MY_TURN_SLOT, 10) - 1;
+    if (player.id === myIdx) setMyPresenceStatus('FALIDO');
   }
   updatePlayersPanel();
+  checkVictory();
+}
+
+/**
+ * Saída VOLUNTÁRIA da partida (abandonou).
+ * Efeito econômico como falência: sai do jogo, propriedades liberadas.
+ * NÃO ativa piloto automático (diferente de DESCONECTADO).
+ * Presença: ARREBATADO (terminal — não volta).
+ */
+function declareArrebatado(player, opts) {
+  opts = opts || {};
+  if (!player || player.bankrupt) return;
+  player.bankrupt = true;
+  player.active = false;
+  player.arrebatado = true;
+  logEvent(`${player.name} foi arrebatado (abandonou a partida).`);
+  player.properties.forEach((id) => {
+    propertyState[id].owner = null; propertyState[id].level = 0; propertyState[id].mortgaged = false;
+    if (typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(id);
+  });
+  player.properties = [];
+  if (player.mesh.parent) boardGroup.remove(player.mesh);
+  showGalardaoToast(`${player.name} abandonou a partida (Arrebatado).`);
+  updatePlayersPanel({ skipBroadcast: !!opts.skipBroadcast });
+  if (!opts.skipBroadcast && typeof broadcastGameEvent === 'function') {
+    broadcastGameEvent(makeGameEvent('PLAYER_ARREBATADO', {
+      playerIndex: player.id,
+    }));
+  }
+  if (!opts.skipBroadcast && typeof broadcastSharedState === 'function') {
+    broadcastSharedState();
+  }
+  // Se era a vez dele, passa o turno antes da vitória
+  if (currentPlayerIdx === player.id && gameState.phase === 'playing' && !GAME_CORE.winner) {
+    const still = players.filter((p) => p.active && !p.bankrupt);
+    if (still.length > 1) {
+      nextActivePlayer();
+      if (typeof updatePlayerHud === 'function') updatePlayerHud();
+    }
+  }
   checkVictory();
 }
 
@@ -7015,11 +7056,12 @@ function isPlayerInAutopilot(playerOrIndex) {
     const p = players[idx];
     if (p && p.isMachine) return true;
   }
-  // ONLINE: ausência / piloto / saída voluntária (partida continua com piloto)
+  // ONLINE: só queda de conexão / piloto — ARREBATADO NÃO usa piloto (é eliminação)
   const slot = String(idx + 1);
   const pr = (typeof presenceBySlot !== 'undefined') ? presenceBySlot[slot] : null;
   if (!pr) return false;
-  return pr.status === 'PILOTO_AUTOMATICO' || pr.status === 'DESCONECTADO' || pr.status === 'ARREBATADO';
+  if (pr.status === 'ARREBATADO' || pr.status === 'FALIDO') return false;
+  return pr.status === 'PILOTO_AUTOMATICO' || pr.status === 'DESCONECTADO';
 }
 
 /**
@@ -7397,6 +7439,13 @@ function handleRemoteGameEvent(event) {
       updatePlayerHud();
       break;
     }
+    case 'PLAYER_ARREBATADO': {
+      const ap = (typeof pi === 'number') ? players[pi] : null;
+      if (ap && typeof declareArrebatado === 'function') {
+        declareArrebatado(ap, { skipBroadcast: true });
+      }
+      break;
+    }
     case 'GAME_OVER': {
       if (event.winnerId != null) GAME_CORE.winner = event.winnerId;
       rollBtn.disabled = true;
@@ -7764,24 +7813,63 @@ el('btnCloseSettings').addEventListener('click', () => {
 });
 el('btnCloseRules').addEventListener('click', () => rulesScreen.classList.add('hidden'));
 
-// ---- Confirmação: encerrar Jornada ----
+// ---- Confirmação: encerrar Jornada / voltar ao início = saída VOLUNTÁRIA ----
 el('btnCancelEnd').addEventListener('click', () => confirmEndScreen.classList.add('hidden'));
-el('btnConfirmEnd').addEventListener('click', () => { confirmEndScreen.classList.add('hidden'); endMatch(); });
+el('btnConfirmEnd').addEventListener('click', () => {
+  confirmEndScreen.classList.add('hidden');
+  leaveMatchVoluntarily();
+});
 
-// ---- Confirmação: voltar à mesa/lobby ----
 el('btnKeepPlaying').addEventListener('click', () => confirmHomeScreen.classList.add('hidden'));
 el('btnConfirmHome').addEventListener('click', () => {
   confirmHomeScreen.classList.add('hidden');
-  // Saída voluntária da partida online → ARREBATADO (definitivo)
-  if (MULTIPLAYER_ONLINE && typeof setMyPresenceStatus === 'function') {
-    setMyPresenceStatus('ARREBATADO');
-  }
-  endMatch();
+  leaveMatchVoluntarily();
 });
 
-// Encerrar a partida: volta para o LOBBY da mesa (se ela ainda existir),
-// deixando a mesa pronta para uma nova rodada, ou para a lista de mesas
-// caso a mesa tenha deixado de existir.
+/**
+ * Saída VOLUNTÁRIA (botão): jogador é ARREBATADO — eliminado como falência.
+ * Os demais continuam. Com 2 jogadores, o outro vence (checkVictory).
+ * NÃO ativa piloto. NÃO reinicia a partida para quem ficou.
+ * Queda de conexão (fechar aba) continua sendo DESCONECTADO + piloto.
+ */
+async function leaveMatchVoluntarily() {
+  hideActionPanel();
+  eventScreenEl.classList.add('hidden');
+  pauseScreen.classList.add('hidden');
+  menuPanel.classList.add('hidden');
+
+  const tableId = gameState.tableId;
+  const wasOnline = MULTIPLAYER_ONLINE && tableId;
+
+  if (wasOnline) {
+    let myIdx = -1;
+    if (MY_TURN_SLOT) myIdx = parseInt(MY_TURN_SLOT, 10) - 1;
+    if (myIdx < 0 || !players[myIdx]) myIdx = currentPlayerIdx;
+    const me = players[myIdx];
+    if (me && !me.bankrupt) {
+      if (typeof setMyPresenceStatus === 'function') setMyPresenceStatus('ARREBATADO');
+      declareArrebatado(me);
+    }
+    // Sai só este cliente — não mexe no status da mesa nem desativa os outros
+    if (unsubscribeGameState) { unsubscribeGameState(); unsubscribeGameState = null; }
+    if (typeof unsubscribeGameEvent !== 'undefined' && unsubscribeGameEvent) {
+      unsubscribeGameEvent(); unsubscribeGameEvent = null;
+    }
+    if (typeof stopPresenceSystem === 'function') stopPresenceSystem();
+    MULTIPLAYER_ONLINE = false;
+    MY_TURN_SLOT = null;
+    gameState.tableId = null;
+    // Remove peões locais da cena deste cliente ao sair
+    players.forEach((p) => { if (p.mesh.parent) boardGroup.remove(p.mesh); });
+    goToHomeScreen();
+    return;
+  }
+
+  // LOCAL: encerra a partida neste dispositivo
+  endMatch();
+}
+
+// Encerrar a partida local (ou pós-vitória): limpa e volta ao menu.
 async function endMatch() {
   players.forEach((p) => { if (p.mesh.parent) boardGroup.remove(p.mesh); p.active = false; });
   hideActionPanel();
@@ -7798,15 +7886,10 @@ async function endMatch() {
   MULTIPLAYER_ONLINE = false;
 
   if (tableId && ACTIVE_MODE === 'online') {
-    try { await activeStore().setStatus(tableId, 'lobby'); } catch (e) {}
-    gameState.phase = 'lobby';
-    hideAllTableScreens();
-    tableLobbyScreen.classList.remove('hidden');
-    showGameChrome(false);
-    const snap = currentTablesSnapshot[tableId];
-    if (snap) renderLobby(snap);
+    // Não força lobby se ainda houver partida com outros — só este cliente sai
+    gameState.tableId = null;
+    goToHomeScreen();
   } else {
-    // LOCAL (ou sem mesa): volta à seleção Local/Online — não à lista de mesas
     goToHomeScreen();
   }
 }
