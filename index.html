@@ -1986,14 +1986,46 @@ function buildRiverMesh(cuts) {
   geo.setIndex(indices);
   geo.computeVertexNormals();
 
+  const WATER_COLOR = 0x1f6a9e;
   const waterMat = new THREE.MeshStandardMaterial({
-    color: 0x1f6a9e, roughness: 0.32, metalness: 0.12,
-    transparent: true, opacity: 0.86, side: THREE.DoubleSide
+    color: WATER_COLOR, roughness: 0.32, metalness: 0.12,
+    transparent: true, opacity: 0.88, side: THREE.FrontSide,
+    depthWrite: true,
   });
   const river = new THREE.Mesh(geo, waterMat);
   river.name = 'riverWater';
   river.receiveShadow = true;
   worldTerrainGroup.add(river);
+
+  // Fundo do rio — mesma cor da superfície, só no perímetro da fita d'água.
+  // Evita “vazamento” de terreno marrom/verde quando a câmera vê por baixo.
+  const bottomPositions = positions.slice();
+  for (let i = 1; i < bottomPositions.length; i += 3) {
+    bottomPositions[i] -= 0.018; // ligeiramente abaixo da superfície
+  }
+  const bottomIndices = [];
+  for (let i = 0; i < N; i++) {
+    const a = i * 2, b = i * 2 + 1, c2 = (i + 1) * 2, d = (i + 1) * 2 + 1;
+    // Ordem invertida para normal apontar para baixo (visível por baixo)
+    bottomIndices.push(a, b, c2, b, d, c2);
+  }
+  const bottomGeo = new THREE.BufferGeometry();
+  bottomGeo.setAttribute('position', new THREE.Float32BufferAttribute(bottomPositions, 3));
+  bottomGeo.setIndex(bottomIndices);
+  bottomGeo.computeVertexNormals();
+  const waterBottomMat = new THREE.MeshStandardMaterial({
+    color: WATER_COLOR,
+    roughness: 0.4,
+    metalness: 0.08,
+    transparent: false,
+    opacity: 1,
+    side: THREE.DoubleSide,
+    depthWrite: true,
+  });
+  const riverBottom = new THREE.Mesh(bottomGeo, waterBottomMat);
+  riverBottom.name = 'riverWaterBottom';
+  riverBottom.renderOrder = -1;
+  worldTerrainGroup.add(riverBottom);
 
   // Pequena poça na foz do rio (fim do canal — sem oceano)
   const mouthIdx = path.length - 1;
@@ -2004,6 +2036,15 @@ function buildRiverMesh(cuts) {
   lake.position.set(mouth.x, mouthY, mouth.z);
   lake.receiveShadow = true;
   worldTerrainGroup.add(lake);
+  // Fundo da poça (mesma cor)
+  const lakeBottom = new THREE.Mesh(
+    new THREE.CircleGeometry(0.45, 20),
+    waterBottomMat
+  );
+  lakeBottom.rotation.x = Math.PI / 2; // face para baixo
+  lakeBottom.position.set(mouth.x, mouthY - 0.018, mouth.z);
+  lakeBottom.name = 'riverLakeBottom';
+  worldTerrainGroup.add(lakeBottom);
 }
 
 /**
@@ -4791,11 +4832,19 @@ function getOwnerColorHex(ownerId) {
   return PLAYER_COLORS[ownerId % PLAYER_COLORS.length] || 0x888888;
 }
 
-function createPropertyBuildingGroup(ownerColor, level) {
+/**
+ * level econômico: 0 = comprada (casinha básica), 1..max = construções.
+ * Visual cresce com o nível; brilho no máximo.
+ * group.userData.spaceId vincula permanentemente à propriedade do tabuleiro.
+ */
+function createPropertyBuildingGroup(ownerColor, level, spaceId) {
   const g = new THREE.Group();
   g.name = 'propertyBuilding';
-  const scale = 0.75 + Math.min(level, 4) * 0.18;
-  const bodyH = 0.10 + Math.min(level, 4) * 0.035;
+  g.userData.spaceId = spaceId;
+  const lv = Math.max(0, Math.min(level, GAME_RULES.maxConstructionLevel || 4));
+  // Nível 0 (só compra) bem visível; cada construção aumenta escala/altura
+  const scale = 1.7 + lv * 0.32;
+  const bodyH = 0.14 + lv * 0.05;
 
   const base = new THREE.Mesh(BUILDING_GEO.base, BUILDING_MAT_NEUTRAL);
   base.position.y = 0.02;
@@ -4824,14 +4873,14 @@ function createPropertyBuildingGroup(ownerColor, level) {
   roof.position.y = 0.04 + bodyH + 0.035;
   g.add(roof);
 
-  if (level >= 3) {
+  if (lv >= 2) {
     const chim = new THREE.Mesh(BUILDING_GEO.chimney, BUILDING_MAT_NEUTRAL);
     chim.position.set(0.04, 0.04 + bodyH + 0.04, 0.02);
     g.add(chim);
   }
 
-  // Brilho sutil no nível máximo
-  if (level >= (GAME_RULES.maxConstructionLevel || 4)) {
+  // Brilho sutil no nível máximo de construção
+  if (lv >= (GAME_RULES.maxConstructionLevel || 4)) {
     bodyMat.emissive = new THREE.Color(ownerColor);
     bodyMat.emissiveIntensity = 0.35;
     const glow = new THREE.PointLight(ownerColor, 0.35, 0.85, 2);
@@ -4850,7 +4899,6 @@ function removePropertyBuildingVisual(id) {
     mesh.traverse((o) => {
       if (o.geometry && o.geometry !== BUILDING_GEO.base && o.geometry !== BUILDING_GEO.roof &&
           o.geometry !== BUILDING_GEO.chimney && o.geometry !== BUILDING_GEO.body) {
-        // body usa geo dinâmica — dispose
         if (o.name === 'buildingBody' && o.geometry) o.geometry.dispose();
       }
       if (o.material && o.material !== BUILDING_MAT_NEUTRAL) {
@@ -4861,31 +4909,39 @@ function removePropertyBuildingVisual(id) {
   }
 }
 
+/**
+ * Posiciona a construção EXATAMENTE sobre a boardSpace da propriedade
+ * (boardSpaces[id].position). Nunca usa player.mesh.position.
+ * Compra (owner definido, level 0) já mostra casinha; construir evolui.
+ */
 function updatePropertyBuildingVisual(id) {
-  const st = propertyState[id];
-  const space = boardSpaces[id];
+  const spaceId = Number(id);
+  const st = propertyState[spaceId];
+  const space = boardSpaces[spaceId];
   if (!st || !space || space.type !== 'PROPRIEDADE') return;
 
-  // Sem dono ou nível 0: remove construção
-  if (st.owner == null || st.level <= 0) {
-    removePropertyBuildingVisual(id);
+  // Sem dono: remove construção desta propriedade
+  if (st.owner == null) {
+    removePropertyBuildingVisual(spaceId);
     return;
   }
 
-  removePropertyBuildingVisual(id);
+  removePropertyBuildingVisual(spaceId);
   const color = getOwnerColorHex(st.owner);
-  const group = createPropertyBuildingGroup(color, st.level);
-  // Posição: centro da casa, levemente deslocado para não cobrir o número
+  const group = createPropertyBuildingGroup(color, st.level || 0, spaceId);
+  // Centro da casa do tabuleiro — posição fixa da propriedade
   const y = space.position.y + SPACE_HEIGHT / 2 + 0.02;
-  group.position.set(space.position.x * 0.92, y, space.position.z * 0.92);
-  if (st.mortgaged) group.traverse((o) => {
-    if (o.material && o.material.opacity !== undefined) {
-      o.material.transparent = true;
-      o.material.opacity = 0.45;
-    }
-  });
+  group.position.set(space.position.x, y, space.position.z);
+  if (st.mortgaged) {
+    group.traverse((o) => {
+      if (o.material && o.material.opacity !== undefined) {
+        o.material.transparent = true;
+        o.material.opacity = 0.45;
+      }
+    });
+  }
   boardGroup.add(group);
-  propertyBuildingMeshes[id] = group;
+  propertyBuildingMeshes[spaceId] = group;
 }
 
 function refreshAllPropertyBuildingVisuals() {
