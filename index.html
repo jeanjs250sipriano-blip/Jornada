@@ -4948,6 +4948,21 @@ function refreshAllPropertyBuildingVisuals() {
   Object.keys(propertyState).forEach((id) => updatePropertyBuildingVisual(Number(id)));
 }
 
+/** Aplica bloco properties do snapshot/remoto e redesenha construções (todos os clientes). */
+function applyRemotePropertiesMap(props) {
+  if (!props || typeof props !== 'object') return;
+  Object.keys(props).forEach((rawId) => {
+    const sid = Number(rawId);
+    if (!propertyState[sid]) return;
+    const s = props[rawId];
+    if (!s || typeof s !== 'object') return;
+    if (s.owner !== undefined) propertyState[sid].owner = (s.owner === null || s.owner === '') ? null : Number(s.owner);
+    if (s.level !== undefined) propertyState[sid].level = Number(s.level) || 0;
+    if (s.mortgaged !== undefined) propertyState[sid].mortgaged = !!s.mortgaged;
+  });
+  refreshAllPropertyBuildingVisuals();
+}
+
 // Posiciona os peões ativos em pequeno círculo ao redor do centro da
 // casa, suportando de 2 a 6 peões na mesma casa sem sobreposição visual.
 function pawnOffset(indexAmongActive, totalActive) {
@@ -5362,9 +5377,12 @@ function buyProperty(player, id) {
   updatePlayersPanel();
   if (typeof broadcastGameEvent === 'function') {
     broadcastGameEvent(makeGameEvent('PROPERTY_PURCHASED', {
-      playerIndex: player.id, spaceId: id, price: price, galardoes: player.galardoes,
+      playerIndex: player.id, spaceId: Number(id), level: propertyState[id].level || 0,
+      price: price, galardoes: player.galardoes,
     }));
   }
+  // Snapshot garante que clientes que perderem o evento ainda vejam a casa
+  if (typeof broadcastSharedState === 'function') broadcastSharedState();
   return true;
 }
 function buildCostFor(id) { return GAME_RULES.constructionBaseCost[boardSpaces[id].group]; }
@@ -5382,9 +5400,10 @@ function buildOnProperty(player, id) {
   if (typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(id);
   if (typeof broadcastGameEvent === 'function') {
     broadcastGameEvent(makeGameEvent('PROPERTY_BUILT', {
-      playerIndex: player.id, spaceId: id, level: propertyState[id].level, galardoes: player.galardoes,
+      playerIndex: player.id, spaceId: Number(id), level: propertyState[id].level, galardoes: player.galardoes,
     }));
   }
+  if (typeof broadcastSharedState === 'function') broadcastSharedState();
   return true;
 }
 function sellBuilding(player, id) {
@@ -5397,9 +5416,10 @@ function sellBuilding(player, id) {
   if (typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(id);
   if (typeof broadcastGameEvent === 'function') {
     broadcastGameEvent(makeGameEvent('PROPERTY_SOLD', {
-      playerIndex: player.id, spaceId: id, level: st.level, galardoes: player.galardoes,
+      playerIndex: player.id, spaceId: Number(id), level: st.level, galardoes: player.galardoes,
     }));
   }
+  if (typeof broadcastSharedState === 'function') broadcastSharedState();
   return true;
 }
 function mortgageProperty(player, id, silent) {
@@ -7214,16 +7234,20 @@ function handleRemoteGameEvent(event) {
       break;
     }
     case 'PROPERTY_PURCHASED': {
-      if (event.spaceId == null || pi == null) break;
-      const st = propertyState[event.spaceId];
-      if (st) st.owner = pi;
+      const sid = Number(event.spaceId);
+      if (!sid || pi == null) break;
+      const st = propertyState[sid];
+      if (st) {
+        st.owner = pi;
+        if (event.level != null) st.level = Number(event.level) || 0;
+      }
       if (p) {
-        if (!p.properties.includes(event.spaceId)) p.properties.push(event.spaceId);
+        if (!p.properties.includes(sid)) p.properties.push(sid);
         if (typeof event.galardoes === 'number') p.galardoes = event.galardoes;
       }
-      if (typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(event.spaceId);
+      if (typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(sid);
       updatePlayersPanel(panelOpts);
-      showGalardaoToast((p ? p.name : ('P' + (pi + 1))) + ' comprou ' + (boardSpaces[event.spaceId] ? boardSpaces[event.spaceId].name : event.spaceId));
+      showGalardaoToast((p ? p.name : ('P' + (pi + 1))) + ' comprou ' + (boardSpaces[sid] ? boardSpaces[sid].name : sid));
       break;
     }
     case 'PROPERTY_DECLINED':
@@ -7240,34 +7264,38 @@ function handleRemoteGameEvent(event) {
       break;
     }
     case 'PROPERTY_BUILT': {
-      if (event.spaceId != null && propertyState[event.spaceId]) {
-        propertyState[event.spaceId].level = event.level != null ? event.level : (propertyState[event.spaceId].level + 1);
+      const sid = Number(event.spaceId);
+      if (sid && propertyState[sid]) {
+        propertyState[sid].level = event.level != null ? Number(event.level) : (propertyState[sid].level + 1);
       }
       if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
-      if (event.spaceId != null && typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(event.spaceId);
+      if (sid && typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(sid);
       updatePlayersPanel(panelOpts);
       break;
     }
     case 'PROPERTY_SOLD': {
-      if (event.spaceId != null && propertyState[event.spaceId]) {
-        propertyState[event.spaceId].level = event.level != null ? event.level : Math.max(0, propertyState[event.spaceId].level - 1);
+      const sid = Number(event.spaceId);
+      if (sid && propertyState[sid]) {
+        propertyState[sid].level = event.level != null ? Number(event.level) : Math.max(0, propertyState[sid].level - 1);
       }
       if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
-      if (event.spaceId != null && typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(event.spaceId);
+      if (sid && typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(sid);
       updatePlayersPanel(panelOpts);
       break;
     }
     case 'PROPERTY_MORTGAGED': {
-      if (event.spaceId != null && propertyState[event.spaceId]) propertyState[event.spaceId].mortgaged = true;
+      const sid = Number(event.spaceId);
+      if (sid && propertyState[sid]) propertyState[sid].mortgaged = true;
       if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
-      if (event.spaceId != null && typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(event.spaceId);
+      if (sid && typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(sid);
       updatePlayersPanel(panelOpts);
       break;
     }
     case 'PROPERTY_REDEEMED': {
-      if (event.spaceId != null && propertyState[event.spaceId]) propertyState[event.spaceId].mortgaged = false;
+      const sid = Number(event.spaceId);
+      if (sid && propertyState[sid]) propertyState[sid].mortgaged = false;
       if (p && typeof event.galardoes === 'number') p.galardoes = event.galardoes;
-      if (event.spaceId != null && typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(event.spaceId);
+      if (sid && typeof updatePropertyBuildingVisual === 'function') updatePropertyBuildingVisual(sid);
       updatePlayersPanel(panelOpts);
       break;
     }
@@ -7344,10 +7372,14 @@ function applyRemoteSharedState(remote) {
         if (s) p.mesh.position.set(s.position.x, s.position.y + SPACE_HEIGHT / 2, s.position.z);
       }
     });
-    Object.entries(remote.properties || {}).forEach(([id, s]) => {
-      if (propertyState[id]) Object.assign(propertyState[id], s);
-    });
-    if (typeof refreshAllPropertyBuildingVisuals === 'function') refreshAllPropertyBuildingVisuals();
+    if (typeof applyRemotePropertiesMap === 'function') {
+      applyRemotePropertiesMap(remote.properties);
+    } else {
+      Object.entries(remote.properties || {}).forEach(([id, s]) => {
+        if (propertyState[id]) Object.assign(propertyState[id], s);
+      });
+      if (typeof refreshAllPropertyBuildingVisuals === 'function') refreshAllPropertyBuildingVisuals();
+    }
     updatePlayerHud();
     if (GAME_CORE.winner !== null) rollBtn.disabled = true;
     console.info('[JORNADA][SYNC] estado aplicado. currentPlayerIdx agora =', currentPlayerIdx, '| isMyTurn() =', isMyTurn(), '| MY_TURN_SLOT =', MY_TURN_SLOT);
@@ -7405,13 +7437,17 @@ function restoreMatchFromSharedState(remote, playerCount) {
       const s = boardSpaces[p.currentSpace];
       if (s) p.mesh.position.set(s.position.x, s.position.y + SPACE_HEIGHT / 2, s.position.z);
     });
-    Object.entries(remote.properties || {}).forEach(([id, s]) => {
-      if (propertyState[id]) Object.assign(propertyState[id], s);
-    });
+    if (typeof applyRemotePropertiesMap === 'function') {
+      applyRemotePropertiesMap(remote.properties);
+    } else {
+      Object.entries(remote.properties || {}).forEach(([id, s]) => {
+        if (propertyState[id]) Object.assign(propertyState[id], s);
+      });
+      if (typeof refreshAllPropertyBuildingVisuals === 'function') refreshAllPropertyBuildingVisuals();
+    }
   } finally {
     applyingRemoteState = false;
   }
-  if (typeof refreshAllPropertyBuildingVisuals === 'function') refreshAllPropertyBuildingVisuals();
   gameState.phase = 'playing';
   gameState.paused = false;
   hideAllTableScreens();
