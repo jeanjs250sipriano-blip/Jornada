@@ -338,6 +338,28 @@
   .lobbySlot .slotTag{ font-size:0.68rem; letter-spacing:0.06em; color:var(--muted); text-transform:uppercase; }
   .lobbySlot.filled .slotTag.host{ color:var(--gold); }
   .lobbySlot.empty{ color:var(--muted); font-style:italic; }
+  .editableNameBtn{
+    flex:1; min-width:0; display:flex; align-items:center; justify-content:space-between; gap:8px;
+    background:transparent; border:1px solid transparent; border-radius:8px; color:inherit;
+    padding:6px 8px; margin:-6px 0; text-align:left; font:inherit; cursor:pointer;
+  }
+  .editableNameBtn:hover{ border-color:rgba(201,163,91,0.38); background:rgba(201,163,91,0.05); }
+  .editableNameBtn .editHint{ color:var(--muted); font-size:.78rem; opacity:.8; flex:none; }
+  .inlineNameInput{
+    flex:1; min-width:0; background:rgba(0,0,0,.28); border:1px solid var(--gold); border-radius:8px;
+    color:var(--cream); font:inherit; padding:7px 9px; outline:none;
+  }
+  .localNamesList{ width:100%; display:flex; flex-direction:column; gap:8px; max-height:52vh; overflow-y:auto; }
+  .localNameRow{
+    display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--panel-border);
+    border-radius:10px; background:rgba(255,255,255,.02);
+  }
+  .localNameRow .slotIdx{ color:var(--muted); width:2.2em; }
+  .localNameRow input{
+    flex:1; min-width:0; background:rgba(0,0,0,.28); border:1px solid var(--panel-border);
+    border-radius:8px; color:var(--cream); font:inherit; padding:9px 10px; outline:none;
+  }
+  .localNameRow input:focus{ border-color:var(--gold); }
 
   .tablesTopBar{ position:absolute; top:18px; right:20px; display:flex; gap:8px; }
   .tablesTopBar .iconBtnSmall{
@@ -459,6 +481,29 @@
     #chatPanel{ top:98px; right:8px; max-height:38vh; }
     #stickerPanel{ top:auto; bottom:92px; right:8px; }
   }
+
+  /* Música — controle compacto ao lado da câmera */
+  #musicControlWrap{position:relative;}
+  #musicControlWrap.hidden{display:none !important;}
+  #tavernMusicBtn{font-size:1.05rem;}
+  #musicControlPanel{
+    position:absolute;top:46px;right:0;z-index:16;width:190px;
+    background:var(--panel-bg);border:1px solid var(--panel-border);border-radius:12px;
+    padding:10px;display:none;flex-direction:column;gap:8px;
+    box-shadow:0 14px 40px rgba(0,0,0,.5);backdrop-filter:blur(12px);
+  }
+  #musicControlPanel.open{display:flex;}
+  .musicHead{display:flex;align-items:center;justify-content:space-between;color:var(--muted);
+    font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;padding:0 2px 6px;
+    border-bottom:1px solid rgba(201,163,91,.18);}
+  .musicHead button{width:25px;height:25px;border-radius:7px;border:1px solid var(--panel-border);
+    background:transparent;color:var(--muted);cursor:pointer;}
+  .musicActions{display:flex;align-items:center;justify-content:space-between;gap:6px;}
+  .musicActions button{width:42px;height:38px;border-radius:9px;border:1px solid var(--panel-border);
+    background:rgba(255,255,255,.03);color:var(--cream);cursor:pointer;font-size:1rem;}
+  .musicActions button:hover{border-color:var(--gold);background:rgba(201,163,91,.1);}
+  #musicVolumeLabel{text-align:center;color:var(--muted);font-size:.68rem;}
+
 </style>
 </head>
 <body>
@@ -492,6 +537,18 @@
           <span class="camHint">Segue somente o seu peão</span>
         </button>
       </div>
+    </div>
+  </div>
+  <div id="musicControlWrap" class="hidden">
+    <button class="iconBtn" id="tavernMusicBtn" title="Controles de música" aria-label="Controles de música">🔊</button>
+    <div id="musicControlPanel" aria-label="Controles de música">
+      <div class="musicHead"><span>Música</span><button type="button" id="musicControlClose" aria-label="Fechar">✕</button></div>
+      <div class="musicActions">
+        <button type="button" id="musicVolumeDown" aria-label="Diminuir volume">🔈</button>
+        <button type="button" id="musicMute" aria-label="Silenciar">🔊</button>
+        <button type="button" id="musicVolumeUp" aria-label="Aumentar volume">🔊</button>
+      </div>
+      <div id="musicVolumeLabel">Volume 70%</div>
     </div>
   </div>
 </div>
@@ -585,6 +642,18 @@
     </div>
     <button class="menuBtn primary" id="btnStartLocalJourney" disabled>INICIAR JORNADA</button>
     <button class="menuBtn" id="btnBackFromLocalSetup">VOLTAR</button>
+  </div>
+</div>
+
+<!-- Nomes dos jogadores — MODO LOCAL / JOGAR COM AMIGOS -->
+<div id="localNamesScreen" class="overlay hidden">
+  <div class="panel">
+    <h2>NOMES DOS JOGADORES</h2>
+    <p class="sub">Toque em cada nome para editar. Todos os jogadores deste dispositivo podem ser personalizados.</p>
+    <div class="localNamesList" id="localNamesList"></div>
+    <p class="formError" id="localNamesError"></p>
+    <button class="menuBtn primary" id="btnStartLocalNamedJourney">INICIAR JORNADA</button>
+    <button class="menuBtn" id="btnBackFromLocalNames">VOLTAR</button>
   </div>
 </div>
 
@@ -6613,6 +6682,7 @@ const el = (id) => document.getElementById(id);
 // Telas do sistema de mesas (novas)
 const homeScreen        = el('homeScreen');
 const localSetupScreen  = el('localSetupScreen');
+const localNamesScreen  = el('localNamesScreen');
 const tableListScreen   = el('tableListScreen');
 const createTableModal  = el('createTableModal');
 const joinTableModal    = el('joinTableModal');
@@ -6645,6 +6715,10 @@ const btnPlayLocalEl     = el('btnPlayLocal');
 const btnPlayOnlineEl    = el('btnPlayOnline');
 const btnStartLocalJourneyEl = el('btnStartLocalJourney');
 const btnBackFromLocalSetupEl = el('btnBackFromLocalSetup');
+const localNamesListEl = el('localNamesList');
+const localNamesErrorEl = el('localNamesError');
+const btnStartLocalNamedJourneyEl = el('btnStartLocalNamedJourney');
+const btnBackFromLocalNamesEl = el('btnBackFromLocalNames');
 const btnRulesFromHomeEl = el('btnRulesFromHome');
 const btnSettingsFromHomeEl = el('btnSettingsFromHome');
 let selectedLocalPlayerCount = null;
@@ -6688,6 +6762,7 @@ function showGameChrome(show) {
 function hideAllTableScreens() {
   if (homeScreen) homeScreen.classList.add('hidden');
   if (localSetupScreen) localSetupScreen.classList.add('hidden');
+  if (localNamesScreen) localNamesScreen.classList.add('hidden');
   tableListScreen.classList.add('hidden');
   createTableModal.classList.add('hidden');
   joinTableModal.classList.add('hidden');
@@ -6899,6 +6974,35 @@ const LocalTableStore = (() => {
       writeAll(tables);
       return tableId;
     },
+    async updateTableName(tableId, name) {
+      const tables = readAll();
+      const t = tables[tableId];
+      if (!t || t.status === 'empty') throw new Error('MESA NÃO ENCONTRADA');
+      if (t.status !== 'lobby') throw new Error('O nome da mesa não pode mais ser alterado.');
+      if (t.hostClientId !== CLIENT_ID) throw new Error('Somente quem criou a mesa pode editar o nome.');
+      const clean = String(name || '').trim().replace(/\s+/g, ' ').slice(0, 32);
+      if (!clean) throw new Error('Digite um nome para a mesa.');
+      t.name = clean;
+      tables[tableId] = t;
+      writeAll(tables);
+      return true;
+    },
+    async updatePlayerName(tableId, slot, name) {
+      const tables = readAll();
+      const t = tables[tableId];
+      if (!t || t.status === 'empty') throw new Error('MESA NÃO ENCONTRADA');
+      if (t.status !== 'lobby') throw new Error('O nome não pode mais ser alterado.');
+      const key = String(slot);
+      const p = t.players && t.players[key];
+      if (!p || p.clientId !== CLIENT_ID) throw new Error('Você só pode editar o seu próprio nome.');
+      const clean = String(name || '').trim().replace(/\s+/g, ' ').slice(0, 24);
+      if (!clean) throw new Error('Digite um nome para o jogador.');
+      p.name = clean;
+      t.players[key] = p;
+      tables[tableId] = t;
+      writeAll(tables);
+      return true;
+    },
     async deleteTable(tableId, password, opts) {
       opts = opts || {};
       const tables = readAll();
@@ -7103,6 +7207,45 @@ const FirebaseTableStore = (() => {
       });
       if (errorMsg) throw new Error(errorMsg);
       return tableId;
+    },
+    async updateTableName(tableId, name) {
+      const db = await apiOrThrow();
+      const { ref, runTransaction } = firebaseDb._api;
+      const clean = String(name || '').trim().replace(/\s+/g, ' ').slice(0, 32);
+      if (!clean) throw new Error('Digite um nome para a mesa.');
+      let errorMsg = null;
+      const result = await runTransaction(ref(db, 'tables/' + tableId), (t) => {
+        if (!t || !t.status || t.status === 'empty') { errorMsg = 'MESA NÃO ENCONTRADA'; return t; }
+        if (t.status !== 'lobby') { errorMsg = 'O nome da mesa não pode mais ser alterado.'; return t; }
+        if (t.hostClientId !== CLIENT_ID) { errorMsg = 'Somente quem criou a mesa pode editar o nome.'; return t; }
+        t.name = clean;
+        return t;
+      });
+      if (errorMsg) throw new Error(errorMsg);
+      if (!result.committed) throw new Error('Não foi possível atualizar o nome da mesa.');
+      return true;
+    },
+    async updatePlayerName(tableId, slot, name) {
+      const db = await apiOrThrow();
+      const { ref, runTransaction } = firebaseDb._api;
+      const clean = String(name || '').trim().replace(/\s+/g, ' ').slice(0, 24);
+      if (!clean) throw new Error('Digite um nome para o jogador.');
+      const key = String(slot);
+      let errorMsg = null;
+      const result = await runTransaction(ref(db, 'tables/' + tableId), (t) => {
+        if (!t || !t.status || t.status === 'empty') { errorMsg = 'MESA NÃO ENCONTRADA'; return t; }
+        if (t.status !== 'lobby') { errorMsg = 'O nome não pode mais ser alterado.'; return t; }
+        const playersMap = normalizePlayers(t.players);
+        const p = playersMap[key];
+        if (!p || p.clientId !== CLIENT_ID) { errorMsg = 'Você só pode editar o seu próprio nome.'; return t; }
+        p.name = clean;
+        playersMap[key] = p;
+        t.players = playersMap;
+        return t;
+      });
+      if (errorMsg) throw new Error(errorMsg);
+      if (!result.committed) throw new Error('Não foi possível atualizar o nome do jogador.');
+      return true;
     },
     async deleteTable(tableId, password, opts) {
       opts = opts || {};
@@ -7726,7 +7869,7 @@ function buildTableCard(id, t) {
     const dot = document.createElement('span'); dot.className = 'dot';
     chip.appendChild(dot);
     const label = p
-      ? ('P' + s + ' — JOGADOR')
+      ? ('P' + s + ' — ' + (p.name || ('Jogador ' + s)))
       : ('P' + s + ' — AGUARDANDO');
     chip.appendChild(document.createTextNode(label));
     slotsRow.appendChild(chip);
@@ -7868,6 +8011,7 @@ async function enterBoardAsObserver(t) {
       existing = await activeStore().getGameState(gameState.tableId);
     }
   } catch (e) {}
+  applyTablePlayerNames(t);
   if (existing && Array.isArray(existing.players) && existing.players.length > 0) {
     restoreMatchFromSharedState(existing, t.maxPlayers);
   } else {
@@ -8047,28 +8191,139 @@ function renderLobby(t) {
     if (gameState.phase !== 'playing') enterBoardFromTable(t);
     return;
   }
-  lobbyTableNameEl.textContent = t.name;
-  const filled = Object.keys(t.players).length;
-  lobbyCountTextEl.textContent = `${filled} / ${t.maxPlayers} JOGADORES`;
 
+  const playersMap = t.players || {};
+  const filled = Object.keys(playersMap).length;
+  lobbyCountTextEl.textContent = `${filled} / ${t.maxPlayers} JOGADORES`;
   lobbySlotsEl.innerHTML = '';
-  // Host não é mais autoridade da partida — qualquer membro pode iniciar
-  const iAmMember = Object.values(t.players || {}).some((p) => p.clientId === CLIENT_ID);
+
+  const myEntry = Object.entries(playersMap).find(([, p]) => p && p.clientId === CLIENT_ID);
+  const iAmMember = !!myEntry;
+  const canEditTableName = iAmMember && t.hostClientId === CLIENT_ID;
+
+  // Nome da mesa: somente o criador, enquanto a mesa ainda está no lobby.
+  const tableNameBtn = document.createElement('button');
+  tableNameBtn.type = 'button';
+  tableNameBtn.className = 'editableNameBtn';
+  tableNameBtn.title = canEditTableName
+    ? 'Editar nome da mesa'
+    : 'Somente o criador pode editar o nome';
+  const tableNameText = document.createElement('span');
+  tableNameText.textContent = t.name || 'MESA';
+  const tableNameHint = document.createElement('span');
+  tableNameHint.className = 'editHint';
+  tableNameHint.textContent = canEditTableName ? '✎' : '';
+  tableNameBtn.append(tableNameText, tableNameHint);
+  if (canEditTableName) {
+    tableNameBtn.addEventListener('click', () => {
+      beginInlineNameEdit(tableNameBtn, t.name || 'MESA', (value) =>
+        activeStore().updateTableName(gameState.tableId, value)
+      );
+    });
+  }
+  lobbyTableNameEl.innerHTML = '';
+  lobbyTableNameEl.appendChild(tableNameBtn);
+
   for (let s = 1; s <= t.maxPlayers; s++) {
-    const p = t.players[s];
+    const p = playersMap[s];
+    const isMine = !!(p && p.clientId === CLIENT_ID);
     const row = document.createElement('div');
-    row.className = 'lobbySlot' + (p ? ' filled' : ' empty') + (p && p.clientId === CLIENT_ID ? ' you' : '');
-    const idx = document.createElement('span'); idx.className = 'slotIdx'; idx.textContent = 'P' + s;
-    const nm = document.createElement('span'); nm.className = 'slotName';
-    nm.textContent = p ? (p.name + (p.clientId === CLIENT_ID ? ' (você)' : '')) : 'AGUARDANDO';
-    const tag = document.createElement('span');
-    tag.className = 'slotTag';
-    tag.textContent = p ? 'JOGADOR' : '';
-    row.append(idx, nm, tag);
+    row.className = 'lobbySlot' + (p ? ' filled' : ' empty') + (isMine ? ' you' : '');
+    const idx = document.createElement('span');
+    idx.className = 'slotIdx';
+    idx.textContent = 'P' + s;
+    row.appendChild(idx);
+
+    if (p) {
+      const nmBtn = document.createElement('button');
+      nmBtn.type = 'button';
+      nmBtn.className = 'editableNameBtn';
+      nmBtn.title = isMine
+        ? 'Editar seu nome'
+        : 'Cada jogador edita somente o próprio nome';
+      const nmText = document.createElement('span');
+      nmText.textContent = p.name || ('Jogador ' + s);
+      const nmHint = document.createElement('span');
+      nmHint.className = 'editHint';
+      nmHint.textContent = isMine ? '✎' : '';
+      nmBtn.append(nmText, nmHint);
+      if (isMine) {
+        nmBtn.addEventListener('click', () => {
+          beginInlineNameEdit(nmBtn, p.name || ('Jogador ' + s), (value) =>
+            activeStore().updatePlayerName(gameState.tableId, s, value)
+          );
+        });
+      }
+      row.appendChild(nmBtn);
+
+      const tag = document.createElement('span');
+      tag.className = 'slotTag' + (t.hostClientId === p.clientId ? ' host' : '');
+      tag.textContent = t.hostClientId === p.clientId ? 'CRIADOR' : 'JOGADOR';
+      row.appendChild(tag);
+    } else {
+      const nm = document.createElement('span');
+      nm.className = 'slotName';
+      nm.textContent = 'AGUARDANDO';
+      row.appendChild(nm);
+      const tag = document.createElement('span');
+      tag.className = 'slotTag';
+      tag.textContent = '';
+      row.appendChild(tag);
+    }
     lobbySlotsEl.appendChild(row);
   }
+
   btnStartFromLobbyEl.style.display = iAmMember ? 'block' : 'none';
   lobbyErrorEl.textContent = '';
+}
+
+function beginInlineNameEdit(button, currentValue, onSave) {
+  if (!button || button.dataset.editing === '1') return;
+  button.dataset.editing = '1';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'inlineNameInput';
+  input.maxLength = 32;
+  input.value = currentValue || '';
+  input.autocomplete = 'off';
+  input.autocapitalize = 'off';
+  input.autocorrect = 'off';
+  input.spellcheck = false;
+  button.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let finished = false;
+  const finish = async (save) => {
+    if (finished) return;
+    finished = true;
+    const value = input.value.trim().replace(/\s+/g, ' ').slice(0, 32);
+    if (!save) {
+      const latest = currentTablesSnapshot[gameState.tableId];
+      if (latest) renderLobby(latest);
+      return;
+    }
+    if (!value) {
+      const latest = currentTablesSnapshot[gameState.tableId];
+      if (latest) renderLobby(latest);
+      lobbyErrorEl.textContent = 'Digite um nome.';
+      return;
+    }
+    try {
+      await onSave(value);
+      const latest = currentTablesSnapshot[gameState.tableId];
+      if (latest) renderLobby(latest);
+    } catch (e) {
+      const latest = currentTablesSnapshot[gameState.tableId];
+      if (latest) renderLobby(latest);
+      lobbyErrorEl.textContent = e.message || 'Não foi possível atualizar o nome.';
+    }
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
 }
 
 btnLeaveLobbyEl.addEventListener('click', async () => {
@@ -8859,6 +9114,17 @@ function restoreMatchFromSharedState(remote, playerCount) {
   console.info('[JORNADA][SYNC] partida EXISTENTE restaurada — turno', currentPlayerIdx);
 }
 
+function applyTablePlayerNames(t) {
+  if (!t || !t.players) return;
+  Object.keys(t.players).forEach((slot) => {
+    const idx = parseInt(slot, 10) - 1;
+    const p = t.players[slot];
+    if (Number.isInteger(idx) && players[idx] && p) {
+      players[idx].name = p.name || ('Jogador ' + (idx + 1));
+    }
+  });
+}
+
 async function enterBoardFromTable(t) {
   hideAllTableScreens();
   gameState.phase = 'playing';
@@ -8899,6 +9165,7 @@ async function enterBoardFromTable(t) {
   const hasExisting = existing && Array.isArray(existing.players) && existing.players.length > 0
     && typeof existing.currentPlayerIdx === 'number';
 
+  applyTablePlayerNames(t);
   if (hasExisting) {
     restoreMatchFromSharedState(existing, t.maxPlayers);
   } else {
@@ -8966,7 +9233,7 @@ function goToTableListScreen() {
 let localGameMode = null;
 
 /** Inicia partida LOCAL direta (sem mesa, senha, lobby ou Firebase). */
-function startLocalMatch(count) {
+function startLocalMatch(count, customNames) {
   ACTIVE_MODE = 'local';
   saveMode('local');
   updateModeUI();
@@ -8984,7 +9251,7 @@ function startLocalMatch(count) {
   // Limpa flags de máquina de partidas anteriores
   players.forEach((p) => {
     p.isMachine = false;
-    if (PLAYER_NAMES[p.id]) p.name = PLAYER_NAMES[p.id];
+    p.name = (customNames && customNames[p.id]) || PLAYER_NAMES[p.id] || ('Jogador ' + (p.id + 1));
   });
   startMatch(count);
 }
@@ -9005,9 +9272,41 @@ function startLocalVsMachine() {
   updatePlayerHud();
 }
 
+// ---- Nomes do modo LOCAL ----
+let pendingLocalNames = [];
+function openLocalNamesScreen() {
+  if (!selectedLocalPlayerCount) return;
+  pendingLocalNames = Array.from({ length: selectedLocalPlayerCount }, (_, i) =>
+    pendingLocalNames[i] || ('Jogador ' + (i + 1))
+  );
+  localNamesListEl.innerHTML = '';
+  localNamesErrorEl.textContent = '';
+  for (let i = 0; i < selectedLocalPlayerCount; i++) {
+    const row = document.createElement('div');
+    row.className = 'localNameRow';
+    const idx = document.createElement('span');
+    idx.className = 'slotIdx';
+    idx.textContent = 'P' + (i + 1);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 24;
+    input.value = pendingLocalNames[i];
+    input.placeholder = 'Jogador ' + (i + 1);
+    input.autocomplete = 'off';
+    input.addEventListener('input', () => { pendingLocalNames[i] = input.value; });
+    input.addEventListener('blur', () => { pendingLocalNames[i] = input.value.trim().replace(/\s+/g, ' ').slice(0, 24); input.value = pendingLocalNames[i]; });
+    row.append(idx, input);
+    localNamesListEl.appendChild(row);
+  }
+  hideAllTableScreens();
+  localNamesScreen.classList.remove('hidden');
+  gameState.phase = 'local_names';
+}
+
 // ---- Home: JOGAR COM AMIGOS / CONTRA A MÁQUINA / ONLINE ----
 btnPlayLocalEl.addEventListener('click', () => {
   selectedLocalPlayerCount = null;
+  pendingLocalNames = [];
   document.querySelectorAll('.localCountBtn').forEach((b) => b.classList.remove('selected'));
   btnStartLocalJourneyEl.disabled = true;
   hideAllTableScreens();
@@ -9038,8 +9337,20 @@ document.querySelectorAll('.localCountBtn').forEach((btn) => {
 });
 btnStartLocalJourneyEl.addEventListener('click', () => {
   if (!selectedLocalPlayerCount) return;
+  openLocalNamesScreen();
+});
+btnStartLocalNamedJourneyEl.addEventListener('click', () => {
+  if (!selectedLocalPlayerCount) return;
+  const names = pendingLocalNames.slice(0, selectedLocalPlayerCount).map((n, i) =>
+    String(n || '').trim().replace(/\s+/g, ' ').slice(0, 24) || ('Jogador ' + (i + 1))
+  );
   localGameMode = 'AMIGOS';
-  startLocalMatch(selectedLocalPlayerCount);
+  startLocalMatch(selectedLocalPlayerCount, names);
+});
+btnBackFromLocalNamesEl.addEventListener('click', () => {
+  hideAllTableScreens();
+  localSetupScreen.classList.remove('hidden');
+  gameState.phase = 'local_setup';
 });
 btnBackFromLocalSetupEl.addEventListener('click', () => goToHomeScreen());
 if (btnBackFromOnlineTablesEl) {
@@ -9165,6 +9476,251 @@ async function endMatch() {
     goToHomeScreen();
   }
 }
+
+
+/* ======================================================================
+   MÚSICA "A JORNADA" — trilha ambiente cinematográfica (Web Audio puro).
+   Sem arquivos externos; menos "retro", mais suave e moderna.
+   ====================================================================== */
+const musicControlWrap = document.getElementById('musicControlWrap');
+const tavernMusicBtn = document.getElementById('tavernMusicBtn');
+const musicControlPanel = document.getElementById('musicControlPanel');
+const musicControlClose = document.getElementById('musicControlClose');
+const musicVolumeDown = document.getElementById('musicVolumeDown');
+const musicMute = document.getElementById('musicMute');
+const musicVolumeUp = document.getElementById('musicVolumeUp');
+const musicVolumeLabel = document.getElementById('musicVolumeLabel');
+
+let jornadaAudioCtx = null;
+let jornadaMaster = null;
+let jornadaFilter = null;
+let jornadaTimer = null;
+let jornadaRunning = false;
+let jornadaMuted = false;
+let jornadaStep = 0;
+// Teto do ganho da música (100% no controle). Antes era 0.20 — mesmo em
+// 100% ficava baixo; agora 100% = 0.60 (3× mais alto).
+const JORNADA_MUSIC_VOL_MAX = 0.60;
+let jornadaVolume = JORNADA_MUSIC_VOL_MAX * 0.70; // controle inicia em 70%
+
+// Andamento calmo (~72 BPM em semínimas); cada tick = colcheia
+const J_TEMPO = 72;
+const J_STEP = 60 / J_TEMPO / 2;
+
+// Progressão ambient (Dm – Bb – F – C) em Hz: root, 3ª, 5ª, 8ª, baixo
+const J_CHORDS = [
+  [146.83, 174.61, 220.00, 293.66, 73.42],   // Dm
+  [116.54, 146.83, 174.61, 233.08, 58.27],   // Bb
+  [174.61, 220.00, 261.63, 349.23, 87.31],   // F
+  [130.81, 164.81, 196.00, 261.63, 65.41],   // C
+  [146.83, 174.61, 220.00, 293.66, 73.42],   // Dm
+  [110.00, 138.59, 164.81, 220.00, 55.00],   // Am
+  [116.54, 146.83, 174.61, 233.08, 58.27],   // Bb
+  [130.81, 164.81, 196.00, 261.63, 65.41],   // C
+];
+
+// Melodia espaçada (null = silêncio) — frases longas, sem arpejo 8-bit
+const J_MOTIFS = [
+  [293.66, null, 349.23, null, 392.00, null, 349.23, null, 293.66, null, 261.63, null, 293.66, null, null, null],
+  [349.23, null, 392.00, null, 440.00, null, 392.00, null, 349.23, null, 329.63, null, 349.23, null, null, null],
+  [392.00, null, 440.00, null, 493.88, null, 440.00, null, 392.00, null, 349.23, null, 329.63, null, 349.23, null],
+  [293.66, null, 261.63, null, 293.66, null, 349.23, null, 329.63, null, 293.66, null, 261.63, null, null, null],
+];
+
+function jornadaAudioInit(){
+  if(jornadaAudioCtx) return true;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if(!AC) return false;
+  jornadaAudioCtx = new AC();
+  jornadaMaster = jornadaAudioCtx.createGain();
+  jornadaMaster.gain.value = jornadaVolume;
+  // Filtro passa-baixa: tira o “canto” metálico e deixa mais moderno
+  jornadaFilter = jornadaAudioCtx.createBiquadFilter();
+  jornadaFilter.type = 'lowpass';
+  jornadaFilter.frequency.value = 2200;
+  jornadaFilter.Q.value = 0.7;
+  const comp = jornadaAudioCtx.createDynamicsCompressor();
+  comp.threshold.value = -22;
+  comp.knee.value = 12;
+  comp.ratio.value = 3.5;
+  comp.attack.value = 0.02;
+  comp.release.value = 0.25;
+  jornadaMaster.connect(jornadaFilter);
+  jornadaFilter.connect(comp);
+  comp.connect(jornadaAudioCtx.destination);
+  return true;
+}
+
+/** Tom suave: ataque lento, liberação longa, leve detune (pad). */
+function jornadaTone(freq, duration, type, vol){
+  if(!jornadaAudioCtx || !jornadaMaster || jornadaMuted || !freq) return;
+  const t = jornadaAudioCtx.currentTime;
+  const o = jornadaAudioCtx.createOscillator();
+  const g = jornadaAudioCtx.createGain();
+  o.type = type || 'sine';
+  o.frequency.setValueAtTime(freq, t);
+  // Detune sutil em voices de pad
+  if(type === 'sine' || type === 'triangle') {
+    try { o.detune.setValueAtTime((Math.random() - 0.5) * 8, t); } catch(e) {}
+  }
+  const attack = Math.min(0.12, duration * 0.25);
+  const release = Math.min(0.55, duration * 0.55);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(vol, t + attack);
+  g.gain.setValueAtTime(vol * 0.92, t + Math.max(attack, duration - release));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + duration + 0.05);
+  o.connect(g);
+  g.connect(jornadaMaster);
+  o.start(t);
+  o.stop(t + duration + 0.08);
+}
+
+/** Pad de acorde: 3–4 senoides suaves no mesmo instante. */
+function jornadaPad(freqs, duration, vol){
+  if(!freqs || !freqs.length) return;
+  freqs.forEach((f, i) => {
+    jornadaTone(f, duration, 'sine', vol * (i === 0 ? 1 : 0.65));
+  });
+  // Segunda voz um pouco mais aguda em triangle bem baixa
+  if(freqs[2]) jornadaTone(freqs[2] * 2, duration * 0.9, 'triangle', vol * 0.22);
+}
+
+function jornadaTick(){
+  if(!jornadaRunning || jornadaMuted) return;
+  const step = jornadaStep++;
+  const chordIdx = Math.floor(step / 8) % J_CHORDS.length;
+  const chord = J_CHORDS[chordIdx];
+  const section = Math.floor(step / 32) % 4;
+  const motif = J_MOTIFS[section];
+  const pos = step % 16;
+
+  // Pad de fundo a cada troca de acorde (suave e longo)
+  if(step % 8 === 0) {
+    jornadaPad([chord[0], chord[1], chord[2], chord[3]], J_STEP * 8.2, 0.018);
+  }
+
+  // Baixo lento (seno)
+  if(pos === 0 || pos === 8) {
+    jornadaTone(chord[4], J_STEP * 3.5, 'sine', 0.028);
+  } else if(pos === 4 || pos === 12) {
+    jornadaTone(chord[4] * 1.5, J_STEP * 2.2, 'sine', 0.014);
+  }
+
+  // Melodia espaçada
+  const note = motif[pos];
+  if(note) {
+    jornadaTone(note, J_STEP * 2.4, 'triangle', 0.022);
+    // Harmônico suave oitava acima
+    jornadaTone(note * 2, J_STEP * 1.8, 'sine', 0.008);
+  }
+
+  // Arpejo bem discreto (só em seções 1 e 3, notas longas)
+  if((section === 1 || section === 3) && pos % 4 === 2) {
+    const arp = [chord[1], chord[2], chord[3]][Math.floor(pos / 4) % 3];
+    jornadaTone(arp, J_STEP * 1.6, 'sine', 0.01);
+  }
+}
+
+function jornadaStartMusic(){
+  if(!jornadaAudioInit()) return;
+  if(jornadaAudioCtx.state === 'suspended') jornadaAudioCtx.resume().catch(()=>{});
+  if(jornadaRunning) return;
+  jornadaRunning = true;
+  jornadaStep = 0;
+  jornadaMaster.gain.setTargetAtTime(jornadaMuted ? 0 : jornadaVolume, jornadaAudioCtx.currentTime, 0.05);
+  jornadaTick();
+  jornadaTimer = setInterval(jornadaTick, J_STEP * 1000);
+  jornadaUpdateUI();
+}
+
+function jornadaStopMusic(){
+  jornadaRunning=false;
+  if(jornadaTimer){clearInterval(jornadaTimer);jornadaTimer=null;}
+  if(jornadaAudioCtx && jornadaMaster)
+    jornadaMaster.gain.setTargetAtTime(0,jornadaAudioCtx.currentTime,.03);
+  jornadaUpdateUI();
+}
+
+function jornadaSetVolume(v){
+  jornadaVolume=Math.max(.025,Math.min(JORNADA_MUSIC_VOL_MAX,v));
+  if(jornadaAudioCtx && jornadaMaster)
+    jornadaMaster.gain.setTargetAtTime(jornadaMuted?0:jornadaVolume,jornadaAudioCtx.currentTime,.03);
+  jornadaUpdateUI();
+}
+
+function jornadaToggleMute(){
+  jornadaMuted=!jornadaMuted;
+  if(jornadaMuted) jornadaStopMusic(); else jornadaStartMusic();
+  jornadaUpdateUI();
+}
+
+function jornadaUpdateUI(){
+  if(!musicControlWrap) return;
+  const playing=typeof gameState!=='undefined' && gameState.phase==='playing';
+  musicControlWrap.classList.toggle('hidden',!playing);
+  if(!playing && musicControlPanel) musicControlPanel.classList.remove('open');
+  if(tavernMusicBtn) tavernMusicBtn.textContent=(jornadaMuted||!jornadaRunning)?'🔇':'🔊';
+  if(musicMute) musicMute.textContent=jornadaMuted?'🔇':'🔊';
+  if(musicVolumeLabel) musicVolumeLabel.textContent='Volume '+Math.round(jornadaVolume/JORNADA_MUSIC_VOL_MAX*100)+'%';
+}
+
+if(tavernMusicBtn) tavernMusicBtn.addEventListener('click',(e)=>{
+  e.stopPropagation();
+  if(musicControlPanel) musicControlPanel.classList.toggle('open');
+  jornadaAudioInit();
+});
+if(musicControlClose) musicControlClose.addEventListener('click',(e)=>{
+  e.stopPropagation(); musicControlPanel.classList.remove('open');
+});
+if(musicVolumeDown) musicVolumeDown.addEventListener('click',(e)=>{
+  e.stopPropagation(); jornadaSetVolume(jornadaVolume-.025);
+});
+if(musicVolumeUp) musicVolumeUp.addEventListener('click',(e)=>{
+  e.stopPropagation(); jornadaSetVolume(jornadaVolume+.025);
+});
+if(musicMute) musicMute.addEventListener('click',(e)=>{
+  e.stopPropagation(); jornadaToggleMute();
+});
+document.addEventListener('pointerdown',(e)=>{
+  if(musicControlPanel && musicControlPanel.classList.contains('open') &&
+     musicControlWrap && !musicControlWrap.contains(e.target))
+    musicControlPanel.classList.remove('open');
+},{passive:true});
+
+/* Conecta a música ao ciclo já existente sem substituir nenhuma função original. */
+const jornadaOriginalStartMatch=startMatch;
+startMatch=function(count){
+  const result=jornadaOriginalStartMatch.apply(this,arguments);
+  jornadaStartMusic();
+  return result;
+};
+
+const jornadaOriginalRestoreMatch=restoreMatchFromSharedState;
+restoreMatchFromSharedState=function(){
+  const result=jornadaOriginalRestoreMatch.apply(this,arguments);
+  jornadaStartMusic();
+  return result;
+};
+
+const jornadaOriginalGoHome=goToHomeScreen;
+goToHomeScreen=function(){
+  jornadaStopMusic();
+  return jornadaOriginalGoHome.apply(this,arguments);
+};
+
+const jornadaOriginalEndMatch=endMatch;
+endMatch=async function(){
+  jornadaStopMusic();
+  return jornadaOriginalEndMatch.apply(this,arguments);
+};
+
+document.addEventListener('pointerdown',()=>{
+  if(typeof gameState!=='undefined' && gameState.phase==='playing' &&
+     !jornadaMuted && !jornadaRunning) jornadaStartMusic();
+},{passive:true});
+
+jornadaUpdateUI();
+
 
 // Estado inicial: tela home (JOGAR LOCAL / JOGAR ONLINE). Firebase/mesas
 // só são usados ao escolher JOGAR ONLINE.
