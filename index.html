@@ -61,7 +61,7 @@
   }
   #rollBtn:hover{ transform:translateY(-1px); box-shadow:0 9px 22px rgba(201,163,91,0.5);}
   #rollBtn:disabled{opacity:0.5; cursor:default; transform:none;}
-  #diceResult{color:var(--cream); font-size:0.92rem; min-width:120px;}
+  #diceResult{color:var(--cream); font-size:0.92rem; min-width:120px; white-space:nowrap;}
   #diceResult b{color:var(--gold); font-size:1.05rem;}
 
   .topRight{ position:fixed; top:22px; right:26px; z-index:5; display:flex; gap:10px; }
@@ -86,7 +86,7 @@
   @media (max-width:640px){
     .brand{font-size:1.2rem; top:14px; left:16px;}
     .hud{gap:10px; padding:10px 14px; bottom:14px; max-width:94vw;}
-    #diceResult{min-width:auto; font-size:0.78rem;}
+    #diceResult{min-width:auto; font-size:0.78rem; white-space:normal; max-width:42vw; line-height:1.2;}
     #rollBtn{padding:9px 14px; font-size:0.8rem;}
     .topRight{top:14px; right:14px;}
   }
@@ -175,19 +175,33 @@
   .galardoesBox .label{ color:var(--muted); font-size:0.62rem; letter-spacing:0.1em; text-transform:uppercase; }
 
   #playersPanel{
-    position:fixed; top:22px; left:26px; z-index:5; margin-top:52px;
-    display:flex; flex-direction:column; gap:6px; max-width:190px;
+    position:fixed; top:22px; left:26px; z-index:12; margin-top:52px;
+    display:flex; flex-direction:column; gap:6px; max-width:260px; min-width:200px;
   }
   #playersPanel.hidden{ display:none; }
   .miniPlayer{
-    display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:9px;
-    background:var(--panel-bg); border:1px solid transparent; font-size:0.76rem; color:var(--muted);
+    display:flex; align-items:center; gap:8px; padding:7px 12px; border-radius:9px;
+    background:var(--panel-bg); border:1px solid transparent; font-size:0.78rem; color:var(--muted);
     backdrop-filter: blur(10px); transition: border-color 0.15s ease, color 0.15s ease;
+    white-space:nowrap; min-width:0;
   }
   .miniPlayer.current{ border-color:var(--panel-border); color:var(--cream); }
   .miniPlayer .dot{ width:9px; height:9px; border-radius:50%; flex:none; }
-  .miniPlayer .g{ margin-left:auto; color:var(--gold); font-variant-numeric:tabular-nums; font-weight:600; }
+  .miniPlayer .nm{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .miniPlayer .g{ margin-left:8px; color:var(--gold); font-variant-numeric:tabular-nums; font-weight:600; flex:none; }
   .miniPlayer.current .g{ color:var(--gold); }
+  .miniPlayer .expandBtn, .playersPanelClose{
+    background:transparent; border:none; color:var(--gold); cursor:pointer;
+    font-size:0.85rem; padding:0 2px; line-height:1; flex:none;
+  }
+  .playersPanelClose{
+    align-self:flex-end; width:28px; height:28px; border-radius:8px;
+    border:1px solid var(--panel-border); background:var(--panel-bg); color:var(--muted);
+    display:flex; align-items:center; justify-content:center; font-size:0.95rem;
+  }
+  .playersPanelClose:hover{ border-color:var(--gold); color:var(--cream); }
+  /* Recolhido: só o card do jogador da vez */
+  #playersPanel.collapsed .miniPlayer:not(.turnSelf){ display:none; }
 
   #galardaoToast{
     position:fixed; top:96px; left:50%; transform:translateX(-50%); z-index:16;
@@ -204,7 +218,8 @@
 
   @media (max-width:640px){
     .panel{ padding:26px 22px; width:92vw; }
-    #playersPanel{ top:auto; bottom:100px; left:12px; margin-top:0; }
+    /* Lista de jogadores no topo-esquerdo — evita colisão com o HUD dos dados */
+    #playersPanel{ top:56px; left:10px; margin-top:0; max-width:220px; min-width:170px; z-index:12; }
     #menuPanel{ right:14px; top:60px; width:200px; }
   }
 
@@ -254,9 +269,11 @@
   .slotChip .dot{ width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7; }
   .tableCard .rowActions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   .tableCard .rowActions .menuBtn{ width:auto; flex:1; padding:9px 12px; font-size:0.82rem; }
-  .tableCard{ position:relative; }
+  .tableCard{ position:relative; padding-right:44px; }
+  .tableCard .rowTop{ padding-right:8px; }
+  .tableCard .tName{ padding-right:6px; max-width:calc(100% - 8px); }
   .tableCard .btnDeleteX{
-    position:absolute; top:10px; right:10px; z-index:2;
+    position:absolute; top:12px; right:12px; z-index:2;
     width:32px; height:32px; flex:none; border-radius:9px; border:1px solid rgba(192,69,60,0.65);
     background:rgba(192,69,60,0.22); color:#ff8a80; font-size:1.25rem; font-weight:700;
     cursor:pointer; display:flex; align-items:center; justify-content:center; line-height:1;
@@ -303,16 +320,20 @@
     .tableCard .rowActions{ flex-direction:column; }
   }
 
-  /* ---- Chat público + figurinhas ---- */
-  #chatFab{
-    position:fixed; right:18px; bottom:110px; z-index:18;
-    width:48px; height:48px; border-radius:50%;
+  /* ---- Chat público + figurinhas (painéis separados, estáticos) ---- */
+  #chatFabRow{
+    position:fixed; right:14px; top:58px; z-index:18;
+    display:none; flex-direction:row; gap:8px; align-items:center;
+  }
+  #chatFabRow.visible{ display:flex; }
+  #chatFab, #stickerFab{
+    position:relative;
+    width:44px; height:44px; border-radius:50%;
     background:var(--panel-bg); border:1px solid var(--panel-border);
-    color:var(--cream); font-size:1.25rem; cursor:pointer;
-    display:none; align-items:center; justify-content:center;
+    color:var(--cream); font-size:1.15rem; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
     box-shadow:0 8px 24px rgba(0,0,0,0.4);
   }
-  #chatFab.visible{ display:flex; }
   #chatFab .badge{
     position:absolute; top:-4px; right:-4px; min-width:18px; height:18px;
     background:#c0453c; color:#fff; font-size:0.65rem; font-weight:700;
@@ -320,9 +341,10 @@
     padding:0 5px;
   }
   #chatFab .badge.show{ display:flex; }
+  /* Painel de texto — menor, mais acima, FIXO (não segue teclado) */
   #chatPanel{
-    position:fixed; right:14px; bottom:168px; z-index:19;
-    width:min(320px, 92vw); max-height:min(420px, 58vh);
+    position:fixed; right:14px; top:108px; z-index:19;
+    width:min(280px, 86vw); max-height:min(280px, 42vh);
     background:var(--panel-bg); border:1px solid var(--panel-border);
     border-radius:14px; display:none; flex-direction:column;
     box-shadow:0 16px 48px rgba(0,0,0,0.55);
@@ -331,42 +353,57 @@
   #chatPanel.open{ display:flex; }
   #chatPanel .chatHead{
     display:flex; align-items:center; justify-content:space-between;
-    padding:10px 12px; border-bottom:1px solid rgba(201,163,91,0.2);
-    color:var(--cream); font-size:0.88rem; font-weight:600;
+    padding:8px 10px; border-bottom:1px solid rgba(201,163,91,0.2);
+    color:var(--cream); font-size:0.82rem; font-weight:600;
   }
-  #chatPanel .chatHead button{
-    background:transparent; border:none; color:var(--muted); font-size:1.1rem; cursor:pointer;
+  #chatPanel .chatHead button, #stickerPanel .stickerHead button{
+    background:transparent; border:none; color:var(--muted); font-size:1.05rem; cursor:pointer;
   }
   #chatMessages{
-    flex:1; overflow-y:auto; padding:10px 12px; min-height:120px; max-height:240px;
-    display:flex; flex-direction:column; gap:8px;
+    flex:1; overflow-y:auto; padding:8px 10px; min-height:72px; max-height:150px;
+    display:flex; flex-direction:column; gap:6px;
   }
-  .chatMsg{ font-size:0.8rem; line-height:1.35; color:var(--cream); word-break:break-word; }
+  .chatMsg{ font-size:0.76rem; line-height:1.3; color:var(--cream); word-break:break-word; }
   .chatMsg .who{ color:var(--gold); font-weight:600; margin-right:4px; }
-  #chatStickers{
-    display:grid; grid-template-columns:repeat(4,1fr); gap:6px;
-    padding:8px 10px; border-top:1px solid rgba(201,163,91,0.15);
-  }
-  #chatStickers button{
-    background:rgba(255,255,255,0.04); border:1px solid rgba(201,163,91,0.22);
-    border-radius:10px; padding:6px; cursor:pointer; min-height:40px;
-    display:flex; align-items:center; justify-content:center;
-  }
-  #chatStickers button:hover{ border-color:var(--gold); background:rgba(201,163,91,0.1); }
-  #chatStickers svg{ width:26px; height:26px; display:block; }
   #chatInputRow{
-    display:flex; gap:6px; padding:8px 10px 10px; border-top:1px solid rgba(201,163,91,0.2);
+    display:flex; gap:6px; padding:7px 8px 9px; border-top:1px solid rgba(201,163,91,0.2);
   }
   #chatInput{
     flex:1; background:rgba(0,0,0,0.28); border:1px solid var(--panel-border);
-    border-radius:10px; color:var(--cream); font-size:0.86rem; padding:9px 11px;
+    border-radius:10px; color:var(--cream); font-size:0.82rem; padding:8px 10px;
     font-family:inherit;
   }
   #chatInput:focus{ outline:none; border-color:var(--gold); }
   #chatSend{
     background:linear-gradient(180deg,#e2c485,var(--gold)); border:none; border-radius:10px;
-    color:#241a0d; font-weight:700; padding:0 14px; cursor:pointer;
+    color:#241a0d; font-weight:700; padding:0 12px; cursor:pointer;
   }
+  /* Painel separado de figurinhas — baixo (acima do HUD dos dados) */
+  #stickerPanel{
+    position:fixed; right:14px; top:auto; bottom:100px; z-index:19;
+    width:min(260px, 84vw);
+    background:var(--panel-bg); border:1px solid var(--panel-border);
+    border-radius:14px; display:none; flex-direction:column;
+    box-shadow:0 16px 48px rgba(0,0,0,0.55);
+    backdrop-filter:blur(12px); overflow:hidden;
+  }
+  #stickerPanel.open{ display:flex; }
+  #stickerPanel .stickerHead{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:8px 10px; border-bottom:1px solid rgba(201,163,91,0.2);
+    color:var(--cream); font-size:0.82rem; font-weight:600;
+  }
+  #stickerGrid{
+    display:grid; grid-template-columns:repeat(4,1fr); gap:6px;
+    padding:10px;
+  }
+  #stickerGrid button{
+    background:rgba(255,255,255,0.04); border:1px solid rgba(201,163,91,0.22);
+    border-radius:10px; padding:6px; cursor:pointer; min-height:40px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #stickerGrid button:hover{ border-color:var(--gold); background:rgba(201,163,91,0.1); }
+  #stickerGrid svg{ width:26px; height:26px; display:block; }
   #stickerOverlay{
     position:fixed; top:70px; left:0; right:0; height:110px; z-index:16;
     pointer-events:none; display:flex; align-items:flex-start; justify-content:center;
@@ -376,8 +413,8 @@
     display:flex; flex-direction:column; align-items:center; gap:2px;
     animation: stickerIn 0.35s ease-out, stickerOut 0.45s ease-in 2.55s forwards;
   }
-  .stickerPop svg{ width:52px; height:52px; filter:drop-shadow(0 4px 12px rgba(0,0,0,0.45)); }
-  .stickerPop .lab{ font-size:0.68rem; color:var(--gold); text-shadow:0 1px 4px rgba(0,0,0,0.8); }
+  .stickerPop svg{ width:88px; height:88px; filter:drop-shadow(0 6px 16px rgba(0,0,0,0.5)); }
+  .stickerPop .lab{ font-size:0.72rem; color:var(--gold); text-shadow:0 1px 4px rgba(0,0,0,0.8); }
   @keyframes stickerIn{
     from{ opacity:0; transform:scale(0.4) translateY(12px); }
     to{ opacity:1; transform:scale(1) translateY(0); }
@@ -386,8 +423,10 @@
     to{ opacity:0; transform:scale(0.85) translateY(-10px); }
   }
   @media (max-width:640px){
-    #chatFab{ bottom:100px; right:12px; width:44px; height:44px; }
-    #chatPanel{ bottom:152px; right:8px; max-height:50vh; }
+    #chatFabRow{ top:52px; right:10px; }
+    #chatFab, #stickerFab{ width:40px; height:40px; font-size:1.05rem; }
+    #chatPanel{ top:98px; right:8px; max-height:38vh; }
+    #stickerPanel{ top:auto; bottom:92px; right:8px; }
   }
 </style>
 </head>
@@ -412,16 +451,22 @@
 
 <div id="galardaoToast"></div>
 
-<!-- Chat público da mesa + área de figurinhas (não interfere no HUD/decisões) -->
-<button type="button" id="chatFab" title="Chat" aria-label="Abrir chat">💬<span class="badge" id="chatBadge">0</span></button>
+<!-- Chat (texto) + figurinhas (ícone separado) — painéis estáticos, sem ancorar no teclado -->
+<div id="chatFabRow">
+  <button type="button" id="chatFab" title="Chat" aria-label="Abrir chat">💬<span class="badge" id="chatBadge">0</span></button>
+  <button type="button" id="stickerFab" title="Figurinhas" aria-label="Abrir figurinhas">😊</button>
+</div>
 <div id="chatPanel" aria-label="Conversa da mesa">
   <div class="chatHead"><span>💬 Conversa</span><button type="button" id="chatClose" aria-label="Fechar">✕</button></div>
   <div id="chatMessages"></div>
-  <div id="chatStickers"></div>
   <div id="chatInputRow">
-    <input id="chatInput" type="text" maxlength="200" placeholder="Digite uma mensagem…" autocomplete="off">
+    <input id="chatInput" type="text" maxlength="200" placeholder="Digite uma mensagem…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-form-type="other">
     <button type="button" id="chatSend">➤</button>
   </div>
+</div>
+<div id="stickerPanel" aria-label="Figurinhas">
+  <div class="stickerHead"><span>Figurinhas</span><button type="button" id="stickerClose" aria-label="Fechar">✕</button></div>
+  <div id="stickerGrid"></div>
 </div>
 <div id="stickerOverlay" aria-hidden="true"></div>
 
@@ -515,11 +560,11 @@
     <p class="sub">Defina uma senha numérica de 4 dígitos para proteger a mesa.</p>
     <div class="fieldRow">
       <label>Senha</label>
-      <input type="password" inputmode="numeric" maxlength="4" id="createPassword" placeholder="••••">
+      <input type="password" inputmode="numeric" maxlength="4" id="createPassword" placeholder="••••" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-form-type="other">
     </div>
     <div class="fieldRow">
       <label>Confirmar senha</label>
-      <input type="password" inputmode="numeric" maxlength="4" id="createPasswordConfirm" placeholder="••••">
+      <input type="password" inputmode="numeric" maxlength="4" id="createPasswordConfirm" placeholder="••••" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-form-type="other">
     </div>
     <p class="formError" id="createTableError"></p>
     <button class="menuBtn primary" id="btnConfirmCreatePassword">CONTINUAR</button>
@@ -534,7 +579,7 @@
     <p class="sub">Digite a senha de 4 dígitos para entrar.</p>
     <div class="fieldRow">
       <label>Senha</label>
-      <input type="password" inputmode="numeric" maxlength="4" id="joinPassword" placeholder="••••">
+      <input type="password" inputmode="numeric" maxlength="4" id="joinPassword" placeholder="••••" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-form-type="other">
     </div>
     <p class="formError" id="joinTableError"></p>
     <button class="menuBtn primary" id="btnConfirmJoinTable">ENTRAR</button>
@@ -813,16 +858,16 @@ const GROUP_NAMES = {
   8: 'Consumação e Glória'
 };
 
-// Paleta visual dos períodos (preservada — não alterar cores)
+// Paleta dos períodos — cores mais vivas/saturadas (ajuste visual 2026)
 const PERIOD_COLORS = [
-  0x3f6b4a, // Período 1
-  0x9c7a35, // Período 2
-  0x8a3f42, // Período 3
-  0x4a7a8a, // Período 4
-  0x5c4a7a, // Período 5
-  0x35486b, // Período 6
-  0x9a5a35, // Período 7
-  0x2f6b52  // Período 8
+  0x2f9a4e, // Período 1 — verde vivo
+  0xd4a020, // Período 2 — ouro âmbar
+  0xc43c42, // Período 3 — vermelho vivo
+  0x3aa0c4, // Período 4 — azul ciano
+  0x7a5ad4, // Período 5 — violeta
+  0x3a6ad4, // Período 6 — azul real
+  0xd47828, // Período 7 — laranja
+  0x28a878  // Período 8 — esmeralda
 ];
 
 // Estrutura de dados dos 8 períodos (seção 34) — pronta para futuramente
@@ -2095,15 +2140,22 @@ function buildRiverMesh(cuts) {
   geo.setIndex(indices);
   geo.computeVertexNormals();
 
-  const WATER_COLOR = 0x1f6a9e;
-  const waterMat = new THREE.MeshStandardMaterial({
-    color: WATER_COLOR, roughness: 0.32, metalness: 0.12,
-    transparent: true, opacity: 0.88, side: THREE.FrontSide,
+  // Azul sólido, sem reflexo especular (MeshBasicMaterial — não responde a luz)
+  const WATER_COLOR = 0x1a7ab8;
+  const waterMat = new THREE.MeshBasicMaterial({
+    color: WATER_COLOR,
+    transparent: true,
+    opacity: 0.92,
+    side: THREE.FrontSide,
     depthWrite: true,
   });
   const river = new THREE.Mesh(geo, waterMat);
   river.name = 'riverWater';
-  river.receiveShadow = true;
+  // leve offset Y anti z-fighting com o relevo
+  river.position.y += 0.012;
+  // Rio estático: sem animação de fluxo/ondas no loop de render
+  river.matrixAutoUpdate = false;
+  river.updateMatrix();
   worldTerrainGroup.add(river);
 
   // Fundo do rio — mesma cor da superfície, só no perímetro da fita d'água.
@@ -2122,10 +2174,8 @@ function buildRiverMesh(cuts) {
   bottomGeo.setAttribute('position', new THREE.Float32BufferAttribute(bottomPositions, 3));
   bottomGeo.setIndex(bottomIndices);
   bottomGeo.computeVertexNormals();
-  const waterBottomMat = new THREE.MeshStandardMaterial({
+  const waterBottomMat = new THREE.MeshBasicMaterial({
     color: WATER_COLOR,
-    roughness: 0.4,
-    metalness: 0.08,
     transparent: false,
     opacity: 1,
     side: THREE.DoubleSide,
@@ -2134,6 +2184,7 @@ function buildRiverMesh(cuts) {
   const riverBottom = new THREE.Mesh(bottomGeo, waterBottomMat);
   riverBottom.name = 'riverWaterBottom';
   riverBottom.renderOrder = -1;
+  riverBottom.position.y += 0.012;
   worldTerrainGroup.add(riverBottom);
 
   // Pequena poça na foz do rio (fim do canal — sem oceano)
@@ -2166,8 +2217,9 @@ function addTerrainDecor(cuts, terrainY) {
   const sandRock = new THREE.MeshStandardMaterial({ color: 0xb89868, roughness: 0.93, metalness: 0.02, flatShading: true });
   const bushMat = new THREE.MeshStandardMaterial({ color: 0x4a6a3a, roughness: 0.9, metalness: 0.02 });
   const edenBush = new THREE.MeshStandardMaterial({ color: 0x5a7a42, roughness: 0.88, metalness: 0.02 });
-  const waterMat = new THREE.MeshStandardMaterial({
-    color: 0x256a92, roughness: 0.3, metalness: 0.1, transparent: true, opacity: 0.82
+  // Água estática (sem reflexo/animação) — MeshBasicMaterial alivia GPU
+  const waterMat = new THREE.MeshBasicMaterial({
+    color: 0x1a7ab8, transparent: true, opacity: 0.9
   });
   const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5a4530, roughness: 0.95, metalness: 0.02 });
   const foliageMats = [
@@ -3025,14 +3077,19 @@ const numberTextureCache = {};
 function getNumberTexture(num) {
   if (numberTextureCache[num]) return numberTextureCache[num];
   const cnv = document.createElement('canvas');
-  cnv.width = 128; cnv.height = 128;
+  cnv.width = 256; cnv.height = 256;
   const ctx = cnv.getContext('2d');
-  ctx.clearRect(0, 0, 128, 128);
-  ctx.fillStyle = 'rgba(234,227,211,0.94)';
-  ctx.font = '600 56px Georgia, serif';
+  ctx.clearRect(0, 0, 256, 256);
+  // Contorno escuro para legibilidade sobre cores vivas
+  ctx.font = '700 118px Georgia, serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(String(num).padStart(2, '0'), 64, 68);
+  const label = String(num).padStart(2, '0');
+  ctx.lineWidth = 10;
+  ctx.strokeStyle = 'rgba(20,16,12,0.75)';
+  ctx.strokeText(label, 128, 136);
+  ctx.fillStyle = 'rgba(255,250,240,0.98)';
+  ctx.fillText(label, 128, 136);
   const tex = new THREE.CanvasTexture(cnv);
   tex.colorSpace = THREE.SRGBColorSpace;
   numberTextureCache[num] = tex;
@@ -3099,30 +3156,35 @@ function createSpaces() {
     const geo = isCorner
       ? createChamferedTileGeometry(width * 0.96, depth * 0.96, SPACE_HEIGHT, Math.sign(s.position.x), Math.sign(s.position.z), Math.min(width, depth) * s.filletRatio)
       : new THREE.BoxGeometry(width * 0.96, SPACE_HEIGHT, depth * 0.96);
-    const mat = new THREE.MeshPhysicalMaterial({
-      color: PERIOD_COLORS[s.period - 1], roughness: 0.42, metalness: 0.16,
-      clearcoat: 0.35, clearcoatRoughness: 0.35
+    // Fosco, sem reflexo esbranquiçado — cor do período bem saturada
+    const mat = new THREE.MeshStandardMaterial({
+      color: PERIOD_COLORS[s.period - 1],
+      roughness: 1.0,
+      metalness: 0.0,
     });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(s.position.x, s.position.y, s.position.z);
+    // Offset Y anti z-fighting com a placa base
+    const spaceY = s.position.y + 0.012;
+    mesh.position.set(s.position.x, spaceY, s.position.z);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     boardGroup.add(mesh);
 
     const edgeLines = new THREE.LineSegments(
       new THREE.EdgesGeometry(geo),
-      new THREE.LineBasicMaterial({ color: 0x0a090c, transparent: true, opacity: 0.4 })
+      new THREE.LineBasicMaterial({ color: 0x0a090c, transparent: true, opacity: 0.45 })
     );
     edgeLines.position.copy(mesh.position);
     boardGroup.add(edgeLines);
 
-    const planeSize = Math.min(width, depth) * 0.55;
+    // Números maiores e mais legíveis
+    const planeSize = Math.min(width, depth) * 0.78;
     const numGeo = new THREE.PlaneGeometry(planeSize, planeSize);
     const numMat = new THREE.MeshBasicMaterial({ map: getNumberTexture(id), transparent: true, depthWrite: false });
     const numMesh = new THREE.Mesh(numGeo, numMat);
     numMesh.rotation.x = -Math.PI / 2;
     numMesh.rotation.z = s.rotationY;
-    numMesh.position.set(s.position.x, s.position.y + SPACE_HEIGHT / 2 + 0.006, s.position.z);
+    numMesh.position.set(s.position.x, spaceY + SPACE_HEIGHT / 2 + 0.014, s.position.z);
     boardGroup.add(numMesh);
 
     spaceMeshes[id] = mesh;
@@ -4826,6 +4888,7 @@ function rollDicePair(callback) {
     ],
     onComplete: () => callback(v1, v2)
   };
+  if (typeof requestRender === 'function') requestRender();
 }
 
 function updateDiceAnim(now) {
@@ -5015,6 +5078,7 @@ function removePropertyBuildingVisual(id) {
       }
     });
     delete propertyBuildingMeshes[id];
+    if (typeof requestRender === 'function') requestRender();
   }
 }
 
@@ -5051,10 +5115,12 @@ function updatePropertyBuildingVisual(id) {
   }
   boardGroup.add(group);
   propertyBuildingMeshes[spaceId] = group;
+  if (typeof requestRender === 'function') requestRender();
 }
 
 function refreshAllPropertyBuildingVisuals() {
   Object.keys(propertyState).forEach((id) => updatePropertyBuildingVisual(Number(id)));
+  if (typeof requestRender === 'function') requestRender();
 }
 
 /** Aplica bloco properties do snapshot/remoto e redesenha construções (todos os clientes). */
@@ -5150,6 +5216,7 @@ let cameraGoal = null;
 
 function focusTo(posVec, targetVec) {
   cameraGoal = { pos: posVec.clone(), target: targetVec.clone() };
+  if (typeof requestRender === 'function') requestRender();
 }
 function updateCameraGoal() {
   if (!cameraGoal) return;
@@ -5188,6 +5255,7 @@ window.JORNADA_CAMERA = { focusOnBoard, focusOnCenter, focusOnDice, focusOnSpace
 const activeTweens = [];
 function tween(duration, onUpdate, onComplete) {
   activeTweens.push({ start: performance.now(), duration, onUpdate, onComplete });
+  if (typeof requestRender === 'function') requestRender();
 }
 function updateTweens(now) {
   for (let i = activeTweens.length - 1; i >= 0; i--) {
@@ -5205,24 +5273,81 @@ if (typeof window.JORNADA_FREEZE_STATIC === 'function') {
   window.JORNADA_FREEZE_STATIC();
 }
 
+/* ----------------------------------------------------------------------
+   RENDER ON-DEMAND (mobile / bateria)
+   Sem loop infinito: só redesenha com interação, damping da câmera,
+   tween de peão, animação de dados ou lerp cinematográfico.
+   Visual (sombras, materiais, rio estático) permanece idêntico.
+   ---------------------------------------------------------------------- */
 let firstFrameRendered = false;
-function animate(now) {
-  requestAnimationFrame(animate);
-  // Apenas o que precisa mudar por frame: tweens, dados, câmera, (magos opcional)
+let renderRequested = false;
+let cameraInteracting = false;
+let dampingFramesLeft = 0; // frames extras após soltar o dedo (damping)
+
+function sceneNeedsAnimation() {
+  if (activeTweens.length > 0) return true;
+  if (diceAnimState) return true;
+  if (cameraGoal) return true;
+  if (cameraInteracting) return true;
+  if (dampingFramesLeft > 0) return true;
+  if (typeof ENABLE_MAGI_MOTION !== 'undefined' && ENABLE_MAGI_MOTION) return true;
+  return false;
+}
+
+function requestRender() {
+  if (renderRequested) return;
+  renderRequested = true;
+  requestAnimationFrame(renderFrame);
+}
+
+function renderFrame(now) {
+  renderRequested = false;
+  if (now == null) now = performance.now();
+
   updateTweens(now);
   updateDiceAnim(now);
-  if (ENABLE_MAGI_MOTION) updateMagiCaravan(now);
+  if (typeof ENABLE_MAGI_MOTION !== 'undefined' && ENABLE_MAGI_MOTION) {
+    updateMagiCaravan(now);
+  }
   updateCameraGoal();
   controls.update();
   renderer.render(scene, camera);
+
   if (!firstFrameRendered) {
     firstFrameRendered = true;
     const loading = document.getElementById('loading');
-    loading.style.opacity = '0';
-    setTimeout(() => loading.remove(), 650);
+    if (loading) {
+      loading.style.opacity = '0';
+      setTimeout(() => loading.remove(), 650);
+    }
   }
+
+  if (dampingFramesLeft > 0) dampingFramesLeft -= 1;
+
+  // Continua o RAF só enquanto houver algo animando / damping
+  if (sceneNeedsAnimation()) requestRender();
 }
-requestAnimationFrame(animate);
+
+// OrbitControls: redesenha só com interação / inércia (damping)
+controls.addEventListener('change', requestRender);
+controls.addEventListener('start', () => {
+  cameraInteracting = true;
+  dampingFramesLeft = 0;
+  requestRender();
+});
+controls.addEventListener('end', () => {
+  cameraInteracting = false;
+  // ~0.5–0.7s de frames para o damping terminar com suavidade
+  dampingFramesLeft = 42;
+  requestRender();
+});
+
+// Primeiro frame (esconde loading) e pronto — sem loop contínuo
+requestRender();
+
+// API auxiliar (animações externas podem forçar frames)
+window.JORNADA_REQUEST_RENDER = requestRender;
+window.triggerAnimationLoop = requestRender;
 
 
 /* ======================================================================
@@ -5278,16 +5403,47 @@ function updatePlayerHud() {
 
 // Painel compacto de Galardões de todos os jogadores ativos (seção 6 do
 // prompt v1.1) — o jogador atual recebe destaque visual maior.
+// Lista retrátil: recolhida = jogador da VEZ; expandida = todos + botão X.
+let playersPanelExpanded = false;
+
 function updatePlayersPanel(opts) {
   playersPanelEl.innerHTML = '';
-  players.forEach((p, i) => {
-    if (!p.active && !p.bankrupt) return;
+  playersPanelEl.classList.toggle('collapsed', !playersPanelExpanded);
+
+  const turnIdx = currentPlayerIdx;
+  const visible = players
+    .map((p, i) => ({ p, i }))
+    .filter(({ p }) => p.active || p.bankrupt);
+
+  if (playersPanelExpanded) {
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'playersPanelClose';
+    closeBtn.title = 'Recolher lista';
+    closeBtn.setAttribute('aria-label', 'Recolher lista de jogadores');
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      playersPanelExpanded = false;
+      updatePlayersPanel({ skipBroadcast: true });
+    });
+    playersPanelEl.appendChild(closeBtn);
+  }
+
+  visible.forEach(({ p, i }) => {
+    const isTurn = i === turnIdx;
+    // Recolhido: só o card do jogador da vez
+    if (!playersPanelExpanded && !isTurn) return;
+
     const row = document.createElement('div');
-    row.className = 'miniPlayer' + (i === currentPlayerIdx ? ' current' : '');
+    row.className = 'miniPlayer'
+      + (isTurn ? ' current' : '')
+      + (isTurn ? ' turnSelf' : '');
     const dot = document.createElement('span');
     dot.className = 'dot';
     dot.style.background = '#' + p.color.toString(16).padStart(6, '0');
     const name = document.createElement('span');
+    name.className = 'nm';
     const slotKey = String(i + 1);
     const pr = (typeof presenceBySlot !== 'undefined') ? presenceBySlot[slotKey] : null;
     let statusTag = '';
@@ -5301,8 +5457,25 @@ function updatePlayersPanel(opts) {
     g.className = 'g';
     g.textContent = formatGalardoes(p.galardoes);
     row.append(dot, name, g);
+
+    // Seta de expansão no card do jogador da vez quando recolhido
+    if (isTurn && !playersPanelExpanded) {
+      const exp = document.createElement('button');
+      exp.type = 'button';
+      exp.className = 'expandBtn';
+      exp.title = 'Ver todos os jogadores';
+      exp.setAttribute('aria-label', 'Expandir lista de jogadores');
+      exp.textContent = '▲';
+      exp.addEventListener('click', (e) => {
+        e.stopPropagation();
+        playersPanelExpanded = true;
+        updatePlayersPanel({ skipBroadcast: true });
+      });
+      row.appendChild(exp);
+    }
     playersPanelEl.appendChild(row);
   });
+
   // Ponte com o estado compartilhado: só o autor da ação deve transmitir.
   // Clientes remotos que apenas refletem eventos passam { skipBroadcast: true }.
   if (opts && opts.skipBroadcast) return;
@@ -6684,14 +6857,14 @@ const CHAT_MAX_MESSAGES = 50;
 const CHAT_MAX_CHARS = 200;
 const CHAT_MIN_INTERVAL_MS = 700;
 const STICKER_DEFS = [
-  { id: 'APPLAUSE', label: 'Aplauso' },
-  { id: 'PRAY', label: 'Oração' },
+  { id: 'CRY_HEAVY', label: 'Chorando' },
+  { id: 'ANGRY', label: 'Raiva' },
   { id: 'LAUGH', label: 'Risada' },
-  { id: 'CRY', label: 'Choro' },
+  { id: 'CRY', label: 'Triste' },
   { id: 'SURPRISE', label: 'Surpresa' },
   { id: 'HEART', label: 'Coração' },
   { id: 'FIRE', label: 'Fogo' },
-  { id: 'CELEBRATION', label: 'Festa' },
+  { id: 'ANGEL', label: 'Anjo' },
 ];
 const processedChatIds = new Set();
 let chatMessagesCache = [];
@@ -6703,12 +6876,12 @@ let chatPinnedToBottom = true;
 
 function stickerSvgMarkup(id) {
   // SVG inline — identidade dourada/creme do JORNADA, sem arquivos externos
-  const common = 'xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="52" height="52"';
+  const common = 'xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"';
   switch (id) {
-    case 'APPLAUSE':
-      return `<svg ${common}><ellipse cx="22" cy="36" rx="10" ry="14" fill="#e8c878"/><ellipse cx="42" cy="36" rx="10" ry="14" fill="#d4a84a"/><path d="M18 28c4-8 12-10 16-2" stroke="#c9a35b" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`;
-    case 'PRAY':
-      return `<svg ${common}><path d="M32 12c-6 10-10 18-10 28a10 10 0 0020 0c0-10-4-18-10-28z" fill="#eae3d3"/><circle cx="32" cy="48" r="4" fill="#c9a35b"/><path d="M28 22h8" stroke="#c9a35b" stroke-width="2"/></svg>`;
+    case 'CRY_HEAVY': // 😭 carinha chorando
+      return `<svg ${common}><circle cx="32" cy="32" r="22" fill="#8eb4d4"/><path d="M20 30c3 3 6 3 9 0M35 30c3 3 6 3 9 0" stroke="#241a0d" stroke-width="2.5" fill="none" stroke-linecap="round"/><path d="M22 44c5 6 15 6 20 0" stroke="#241a0d" stroke-width="2.5" fill="none"/><ellipse cx="24" cy="40" rx="3.5" ry="7" fill="#3d6fa8"/><ellipse cx="40" cy="40" rx="3.5" ry="7" fill="#3d6fa8"/></svg>`;
+    case 'ANGRY': // 😡 carinha com raiva
+      return `<svg ${common}><circle cx="32" cy="32" r="22" fill="#c0453c"/><path d="M18 24l10 6M46 24l-10 6" stroke="#241a0d" stroke-width="3" stroke-linecap="round"/><circle cx="24" cy="32" r="3" fill="#241a0d"/><circle cx="40" cy="32" r="3" fill="#241a0d"/><path d="M24 44c4-5 12-5 16 0" stroke="#241a0d" stroke-width="2.5" fill="none" stroke-linecap="round"/></svg>`;
     case 'LAUGH':
       return `<svg ${common}><circle cx="32" cy="32" r="22" fill="#e2c485"/><circle cx="24" cy="28" r="3" fill="#241a0d"/><circle cx="40" cy="28" r="3" fill="#241a0d"/><path d="M22 38c4 8 16 8 20 0" stroke="#241a0d" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`;
     case 'CRY':
@@ -6719,20 +6892,21 @@ function stickerSvgMarkup(id) {
       return `<svg ${common}><path d="M32 50S12 36 12 24c0-7 6-12 12-12 4 0 7 2 8 5 1-3 4-5 8-5 6 0 12 5 12 12 0 12-20 26-20 26z" fill="#c0453c"/><path d="M22 22c2-3 6-2 7 1" stroke="#e8a29c" stroke-width="2" fill="none"/></svg>`;
     case 'FIRE':
       return `<svg ${common}><path d="M32 10c4 10-6 14-2 24 2 6 10 8 10 16 0 8-6 12-14 12s-14-4-14-12c0-10 8-14 10-22 1-4-2-10 10-18z" fill="#e07a2f"/><path d="M32 28c2 6-2 8 0 14 1 3 4 4 4 8 0 4-3 6-7 6s-7-2-7-6c0-5 4-7 5-12" fill="#f0c14a"/></svg>`;
-    case 'CELEBRATION':
-      return `<svg ${common}><circle cx="32" cy="36" r="14" fill="#c9a35b"/><path d="M32 22v-8M24 24l-5-5M40 24l5-5" stroke="#e2c485" stroke-width="3" stroke-linecap="round"/><circle cx="18" cy="18" r="3" fill="#c0453c"/><circle cx="46" cy="16" r="3" fill="#3d6fa8"/><circle cx="32" cy="12" r="2.5" fill="#4a8a5c"/></svg>`;
+    case 'ANGEL': // 😇 carinha angelical com auréola
+      return `<svg ${common}><ellipse cx="32" cy="14" rx="14" ry="5" fill="none" stroke="#e2c485" stroke-width="3"/><circle cx="32" cy="36" r="20" fill="#f5e6b8"/><circle cx="25" cy="34" r="2.8" fill="#241a0d"/><circle cx="39" cy="34" r="2.8" fill="#241a0d"/><path d="M25 44c3 4 11 4 14 0" stroke="#241a0d" stroke-width="2.5" fill="none" stroke-linecap="round"/><path d="M14 40c-6 2-8 8-4 10M50 40c6 2 8 8 4 10" stroke="#eae3d3" stroke-width="2.5" fill="none" stroke-linecap="round"/></svg>`;
     default:
       return `<svg ${common}><circle cx="32" cy="32" r="20" fill="#c9a35b"/></svg>`;
   }
 }
 
 function setChatUiVisible(show) {
-  const fab = document.getElementById('chatFab');
+  const row = document.getElementById('chatFabRow');
   const panel = document.getElementById('chatPanel');
-  if (!fab) return;
-  fab.classList.toggle('visible', !!show);
-  if (!show && panel) {
-    panel.classList.remove('open');
+  const stickerPanel = document.getElementById('stickerPanel');
+  if (row) row.classList.toggle('visible', !!show);
+  if (!show) {
+    if (panel) panel.classList.remove('open');
+    if (stickerPanel) stickerPanel.classList.remove('open');
     chatPanelOpen = false;
   }
 }
@@ -6748,7 +6922,9 @@ function stopChatSystem() {
   const box = document.getElementById('chatMessages');
   if (box) box.innerHTML = '';
   const panel = document.getElementById('chatPanel');
+  const stickerPanel = document.getElementById('stickerPanel');
   if (panel) panel.classList.remove('open');
+  if (stickerPanel) stickerPanel.classList.remove('open');
   chatPanelOpen = false;
   setChatUiVisible(false);
 }
@@ -6920,13 +7096,16 @@ async function sendSticker(stickerId) {
 
 function initChatUi() {
   const fab = document.getElementById('chatFab');
+  const stickerFab = document.getElementById('stickerFab');
   const panel = document.getElementById('chatPanel');
+  const stickerPanel = document.getElementById('stickerPanel');
   const closeBtn = document.getElementById('chatClose');
+  const stickerClose = document.getElementById('stickerClose');
   const sendBtn = document.getElementById('chatSend');
   const input = document.getElementById('chatInput');
-  const stickers = document.getElementById('chatStickers');
+  const stickers = document.getElementById('stickerGrid');
   const box = document.getElementById('chatMessages');
-  if (!fab || !panel || !stickers) return;
+  if (!fab || !panel || !stickers || !stickerFab || !stickerPanel) return;
 
   stickers.innerHTML = '';
   STICKER_DEFS.forEach((s) => {
@@ -6934,23 +7113,39 @@ function initChatUi() {
     b.type = 'button';
     b.title = s.label;
     b.innerHTML = stickerSvgMarkup(s.id);
-    b.addEventListener('click', () => sendSticker(s.id));
+    b.addEventListener('click', () => {
+      sendSticker(s.id);
+      // Mantém o painel aberto para enviar outra; fecha se preferir: stickerPanel.classList.remove('open');
+    });
     stickers.appendChild(b);
   });
 
   fab.addEventListener('click', () => {
     chatPanelOpen = !chatPanelOpen;
     panel.classList.toggle('open', chatPanelOpen);
+    // Ao abrir o chat, fecha figurinhas (evita sobreposição)
     if (chatPanelOpen) {
+      stickerPanel.classList.remove('open');
       chatUnread = 0;
       updateChatBadge();
       chatPinnedToBottom = true;
       renderChatMessages(chatMessagesCache.filter((m) => m && m.type !== 'STICKER'));
     }
   });
+  stickerFab.addEventListener('click', () => {
+    const open = !stickerPanel.classList.contains('open');
+    stickerPanel.classList.toggle('open', open);
+    if (open) {
+      panel.classList.remove('open');
+      chatPanelOpen = false;
+    }
+  });
   if (closeBtn) closeBtn.addEventListener('click', () => {
     chatPanelOpen = false;
     panel.classList.remove('open');
+  });
+  if (stickerClose) stickerClose.addEventListener('click', () => {
+    stickerPanel.classList.remove('open');
   });
   if (sendBtn) sendBtn.addEventListener('click', () => {
     if (!input) return;
@@ -6964,6 +7159,7 @@ function initChatUi() {
       input.value = '';
     }
   });
+  // Sem ancoragem/congelamento no teclado — painel permanece fixo onde abriu
   if (box) {
     box.addEventListener('scroll', () => {
       const dist = box.scrollHeight - box.scrollTop - box.clientHeight;
@@ -7221,6 +7417,18 @@ let pendingCreatePassword = null;
 [createPasswordEl, createPasswordConfirmEl, joinPasswordEl].forEach((inp) => {
   inp.addEventListener('input', () => { inp.value = inp.value.replace(/\D/g, '').slice(0, 4); });
 });
+// Desativa autocompletar/sugestões de senha em todos os campos do jogo
+function disableAllAutocomplete() {
+  document.querySelectorAll('input, textarea').forEach((inp) => {
+    inp.setAttribute('autocomplete', inp.type === 'password' ? 'new-password' : 'off');
+    inp.setAttribute('autocapitalize', 'off');
+    inp.setAttribute('autocorrect', 'off');
+    inp.setAttribute('spellcheck', 'false');
+    inp.setAttribute('data-lpignore', 'true');
+    inp.setAttribute('data-form-type', 'other');
+  });
+}
+disableAllAutocomplete();
 
 btnCreateTableEl.addEventListener('click', () => {
   if (btnCreateTableEl.disabled) return;
