@@ -64,7 +64,7 @@
   #diceResult{color:var(--cream); font-size:0.92rem; min-width:120px; white-space:nowrap;}
   #diceResult b{color:var(--gold); font-size:1.05rem;}
 
-  .topRight{ position:fixed; top:22px; right:26px; z-index:5; display:flex; gap:10px; }
+  .topRight{ position:fixed; top:22px; right:26px; z-index:5; display:flex; gap:10px; align-items:flex-start; }
   .iconBtn{
     background:var(--panel-bg); border:1px solid var(--panel-border);
     color:var(--cream); width:38px; height:38px; border-radius:10px;
@@ -72,6 +72,37 @@
     cursor:pointer; font-size:1.05rem; user-select:none;
   }
   .iconBtn:hover{ border-color: var(--gold); }
+  #cameraModeWrap{ position:relative; }
+  #cameraModePanel{
+    position:absolute; top:46px; right:0; z-index:16; width:210px;
+    background:var(--panel-bg); border:1px solid var(--panel-border); border-radius:12px;
+    padding:8px; display:none; flex-direction:column; gap:4px;
+    box-shadow:0 14px 40px rgba(0,0,0,0.5);
+  }
+  #cameraModePanel.open{ display:flex; }
+  #cameraModePanel .camPanelHead{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:2px 4px 6px; border-bottom:1px solid rgba(201,163,91,0.18); margin-bottom:2px;
+  }
+  #cameraModePanel .camPanelHead span{ color:var(--muted); font-size:0.68rem; letter-spacing:0.06em; text-transform:uppercase; }
+  #cameraModePanel .camClose{
+    width:26px; height:26px; border-radius:7px; border:1px solid var(--panel-border);
+    background:transparent; color:var(--muted); cursor:pointer; font-size:0.95rem;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #cameraModePanel .camClose:hover{ border-color:var(--gold); color:var(--cream); }
+  #cameraModePanel button.camOpt{
+    background:transparent; border:1px solid transparent; color:var(--cream);
+    text-align:left; padding:10px 12px; border-radius:8px; cursor:pointer;
+    font-family:'Inter',sans-serif; font-size:0.82rem;
+  }
+  #cameraModePanel button.camOpt:hover{ background:rgba(201,163,91,0.12); border-color:rgba(201,163,91,0.25); }
+  #cameraModePanel button.camOpt.active{
+    border-color:var(--gold); color:var(--gold); background:rgba(201,163,91,0.12);
+  }
+  #cameraModePanel button.camOpt .camHint{
+    display:block; color:var(--muted); font-size:0.68rem; margin-top:2px; font-weight:400;
+  }
 
   #loading{
     position:fixed; inset:0; background:var(--bg); z-index:20;
@@ -436,8 +467,33 @@
 <div class="brand">JORNADA <span>3D</span></div>
 <div class="topRight">
   <div class="iconBtn hidden" id="menuBtn" title="Menu">☰</div>
-  <div class="iconBtn hidden" id="resetViewBtn" title="Centralizar câmera">⌂</div>
-  <div class="iconBtn hidden" id="resetGameBtn" title="Reiniciar partida">↺</div>
+  <div id="cameraModeWrap" class="hidden">
+    <div class="iconBtn" id="cameraModeBtn" title="Modo de câmera" aria-label="Modo de câmera">📷</div>
+    <div id="cameraModePanel" role="menu" aria-label="Modos de câmera">
+      <div class="camPanelHead">
+        <span>Câmera</span>
+        <button type="button" class="camClose" id="cameraModeClose" aria-label="Fechar">✕</button>
+      </div>
+      <button type="button" class="camOpt" data-cam-mode="home" id="camOptHome">
+        ⌂ Visão inicial
+        <span class="camHint">Trava no enquadramento padrão (soltar volta)</span>
+      </button>
+      <button type="button" class="camOpt" data-cam-mode="follow" id="camOptFollow">
+        ▶ Seguir peão
+        <span class="camHint">Escolha seguir todos ou seu peão</span>
+      </button>
+      <div id="camFollowOptions" style="display:none; flex-direction:column; gap:4px; padding:2px 0 4px 10px;">
+        <button type="button" class="camOpt" data-follow-target="all" id="camFollowAll">
+          👥 Seguir todos
+          <span class="camHint">Segue o peão da vez</span>
+        </button>
+        <button type="button" class="camOpt" data-follow-target="mine" id="camFollowMine">
+          👤 Seguir meu peão
+          <span class="camHint">Segue somente o seu peão</span>
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div id="playersPanel" class="hidden"></div>
@@ -710,7 +766,7 @@ const TABLE_Y        = 0;         // altura do tampo da mesa (referência)
 // Aumentam a PLACA do tabuleiro e a MESA sem tocar em nenhuma casa: as
 // 66 casas continuam nas mesmas posições absolutas de sempre.
 const BOARD_MARGIN_EXTRA = 4.8; // margem total (branca) reservada p/ os períodos bíblicos futuros
-const TABLE_MARGIN_EXTRA = 6.6; // margem total de madeira visível da mesa além do tabuleiro
+const TABLE_MARGIN_EXTRA = 11.5; // mesa bem maior que o tabuleiro (espaço p/ itens decorativos)
 
 const PLAYER_COLORS = [0xc0453c, 0x3d6fa8, 0xc9a53c, 0x4a8a5c, 0x7a5ba6, 0xd1783b];
 const PLAYER_NAMES  = ['Jogador 1', 'Jogador 2', 'Jogador 3', 'Jogador 4', 'Jogador 5', 'Jogador 6'];
@@ -1250,9 +1306,11 @@ scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.045).texture;
 // Baseado nas dimensões OUTERAS (placa+margem), não só no circuito, para
 // que câmera, luzes e neblina acompanhem o novo tabuleiro maior.
 const boardDiag = Math.max(BOARD_OUTER_W, BOARD_OUTER_D);
-scene.fog = new THREE.Fog(0x131826, boardDiag * 1.55, boardDiag * 3.3); // névoa mais azulada (era quase preta/neutra)
+const tableDiag = Math.max(TABLE_OUTER_W, TABLE_OUTER_D);
+// Névoa um pouco mais longe para a mesa ampliada não “sumir” no zoom out
+scene.fog = new THREE.Fog(0x131826, tableDiag * 1.15, tableDiag * 3.6);
 
-const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 100);
+const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 200);
 const DEFAULT_CAM_POS = new THREE.Vector3(0, boardDiag * 0.98, boardDiag * 1.06);
 const DEFAULT_TARGET  = new THREE.Vector3(0, 0.3, 0);
 camera.position.copy(DEFAULT_CAM_POS);
@@ -1261,8 +1319,9 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.copy(DEFAULT_TARGET);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
-controls.minDistance = boardDiag * 0.55;
-controls.maxDistance = boardDiag * 1.9;
+// Zoom próximo no tabuleiro; afastamento amplo para enxergar a mesa inteira
+controls.minDistance = boardDiag * 0.5;
+controls.maxDistance = Math.max(boardDiag * 2.85, Math.max(TABLE_OUTER_W, TABLE_OUTER_D) * 1.55);
 controls.maxPolarAngle = Math.PI * 0.47;   // impede câmera de ir abaixo da mesa
 controls.minPolarAngle = Math.PI * 0.12;   // impede visão totalmente de topo
 controls.update();
@@ -1320,66 +1379,290 @@ const spaceMeshes = {};
 function createTable() {
   const w = TABLE_OUTER_W;
   const d = TABLE_OUTER_D;
+  const tableTopY = TABLE_Y - 0.12; // um pouco mais baixo que a base do tabuleiro → menos z-fight
 
-  const topGeo = new THREE.BoxGeometry(w, 0.16, d);
-  const topMat = new THREE.MeshPhysicalMaterial({
-    color: 0x4a2f22, roughness: 0.38, metalness: 0.04,
-    clearcoat: 0.55, clearcoatRoughness: 0.28
+  // Tampo fosco e claro o bastante; polygonOffset reduz “frizz”/piscada
+  const topGeo = new THREE.BoxGeometry(w, 0.14, d);
+  const topMat = new THREE.MeshStandardMaterial({
+    color: 0x6a4530,
+    roughness: 0.88,
+    metalness: 0.02,
+    polygonOffset: true,
+    polygonOffsetFactor: 2,
+    polygonOffsetUnits: 2
   });
   const top = new THREE.Mesh(topGeo, topMat);
-  top.position.y = TABLE_Y - 0.08;
+  top.position.y = tableTopY;
   top.receiveShadow = true;
+  top.castShadow = false;
   scene.add(top);
 
-  // Fio dourado discreto embutido na borda do tampo — acabamento "premium"
-  // sem competir visualmente com o tabuleiro.
-  const trimGeo = new THREE.BoxGeometry(w + 0.012, 0.02, d + 0.012);
-  const trimMat = new THREE.MeshPhysicalMaterial({ color: 0xc9a35b, metalness: 1, roughness: 0.32, clearcoat: 0.4 });
+  // Borda dourada discreta (separada em Y do tampo)
+  const trimGeo = new THREE.BoxGeometry(w + 0.02, 0.018, d + 0.02);
+  const trimMat = new THREE.MeshStandardMaterial({
+    color: 0xb8944a, metalness: 0.45, roughness: 0.55,
+    polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
+  });
   const trim = new THREE.Mesh(trimGeo, trimMat);
-  trim.position.y = TABLE_Y - 0.08 + 0.071;
+  trim.position.y = tableTopY + 0.072;
+  trim.castShadow = false;
   scene.add(trim);
 
-  const legGeo = new THREE.CylinderGeometry(0.075, 0.105, 1.1, 16);
-  const legMat = new THREE.MeshPhysicalMaterial({ color: 0x241811, roughness: 0.45, metalness: 0.08, clearcoat: 0.3 });
-  const capMat = new THREE.MeshPhysicalMaterial({ color: 0xc9a35b, metalness: 1, roughness: 0.3 });
-  const legX = w / 2 - 0.3, legZ = d / 2 - 0.3;
+  // Pés simplificados
+  const legGeo = new THREE.CylinderGeometry(0.08, 0.11, 1.1, 8);
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x2a1a12, roughness: 0.8, metalness: 0.04 });
+  const legX = w / 2 - 0.35, legZ = d / 2 - 0.35;
   [[1, 1], [1, -1], [-1, 1], [-1, -1]].forEach(([sx, sz]) => {
     const leg = new THREE.Mesh(legGeo, legMat);
-    leg.position.set(sx * legX, TABLE_Y - 0.08 - 0.63, sz * legZ);
-    leg.castShadow = true;
+    leg.position.set(sx * legX, tableTopY - 0.62, sz * legZ);
+    leg.castShadow = false;
+    leg.receiveShadow = false;
     scene.add(leg);
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.082, 0.082, 0.02, 16), capMat);
-    cap.position.set(sx * legX, TABLE_Y - 0.08 - 0.08, sz * legZ);
-    scene.add(cap);
   });
 
-  const floorGeo = new THREE.PlaneGeometry(60, 60);
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0x0a090c, roughness: 0.85, metalness: 0.1 });
+  // Piso cerâmico — lajotas GRANDES cinza-claro (estilo porcelanato da foto)
+  const floorSpan = Math.max(w, d) * 2.0;
+  const floorGeo = new THREE.PlaneGeometry(floorSpan, floorSpan);
+  const ceramicTex = (() => {
+    const size = 512;
+    const cnv = document.createElement('canvas');
+    cnv.width = size; cnv.height = size;
+    const ctx = cnv.getContext('2d');
+    ctx.fillStyle = '#d8d6d2';
+    ctx.fillRect(0, 0, size, size);
+    // Atlas 2×2 + pouco repeat = lajotas bem grandes no mundo
+    const tiles = 2;
+    const cell = size / tiles;
+    const grout = 5;
+    for (let iy = 0; iy < tiles; iy++) {
+      for (let ix = 0; ix < tiles; ix++) {
+        const shade = 214 + ((ix + iy * 2) % 3) * 3;
+        ctx.fillStyle = `rgb(${shade},${shade - 1},${shade - 3})`;
+        ctx.fillRect(ix * cell + grout, iy * cell + grout, cell - grout * 2, cell - grout * 2);
+        for (let n = 0; n < 40; n++) {
+          const nx = ix * cell + grout + Math.random() * (cell - grout * 2);
+          const ny = iy * cell + grout + Math.random() * (cell - grout * 2);
+          ctx.fillStyle = `rgba(255,255,255,${0.015 + Math.random() * 0.02})`;
+          ctx.fillRect(nx, ny, 2, 2);
+        }
+        const grd = ctx.createLinearGradient(ix * cell, iy * cell, ix * cell + cell * 0.7, iy * cell + cell * 0.7);
+        grd.addColorStop(0, 'rgba(255,255,255,0.1)');
+        grd.addColorStop(1, 'rgba(0,0,0,0.04)');
+        ctx.fillStyle = grd;
+        ctx.fillRect(ix * cell + grout, iy * cell + grout, cell - grout * 2, cell - grout * 2);
+      }
+    }
+    // Rejunte fino e claro
+    ctx.strokeStyle = '#b8b5b0';
+    ctx.lineWidth = grout;
+    for (let i = 0; i <= tiles; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * cell, 0);
+      ctx.lineTo(i * cell, size);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, i * cell);
+      ctx.lineTo(size, i * cell);
+      ctx.stroke();
+    }
+    const tex = new THREE.CanvasTexture(cnv);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    const reps = Math.max(1.6, floorSpan * 0.12);
+    tex.repeat.set(reps, reps);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    return tex;
+  })();
+  const floorMat = new THREE.MeshStandardMaterial({
+    map: ceramicTex,
+    color: 0xffffff,
+    roughness: 0.42,
+    metalness: 0.04
+  });
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotation.x = -Math.PI / 2;
-  floor.position.y = TABLE_Y - 0.08 - 1.19;
+  floor.position.y = tableTopY - 1.18;
   floor.receiveShadow = true;
+  floor.castShadow = false;
   scene.add(floor);
 
-  // Sombra de contato suave sob a mesa — um disco com textura radial em
-  // alpha, não uma sombra real, mas reforça o "chão" sem custo de GPU.
   const shadowTex = (() => {
     const cnv = document.createElement('canvas');
-    cnv.width = 256; cnv.height = 256;
+    cnv.width = 128; cnv.height = 128;
     const ctx = cnv.getContext('2d');
-    const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
-    g.addColorStop(0, 'rgba(0,0,0,0.55)');
+    const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    g.addColorStop(0, 'rgba(0,0,0,0.45)');
     g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, 256, 256);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
     return new THREE.CanvasTexture(cnv);
   })();
   const contactShadow = new THREE.Mesh(
-    new THREE.PlaneGeometry(Math.max(w, d) * 1.6, Math.max(w, d) * 1.6),
+    new THREE.PlaneGeometry(Math.max(w, d) * 1.45, Math.max(w, d) * 1.45),
     new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false })
   );
   contactShadow.rotation.x = -Math.PI / 2;
-  contactShadow.position.y = TABLE_Y - 0.08 - 1.18;
+  contactShadow.position.y = tableTopY - 1.17;
   scene.add(contactShadow);
+
+  // Itens decorativos na margem da mesa (fora do tabuleiro)
+  addTableProps(w, d, tableTopY + 0.072);
+}
+
+/** Itens na madeira da mesa: 6 copos grandes, garrafa 2L, cubo mágico, petiscos. */
+function addTableProps(tableW, tableD, surfaceY) {
+  const halfBoardW = BOARD_OUTER_W * 0.5;
+  const halfBoardD = BOARD_OUTER_D * 0.5;
+  const marginX = tableW * 0.5 - halfBoardW;
+  const marginZ = tableD * 0.5 - halfBoardD;
+  if (marginX < 0.35 && marginZ < 0.35) return;
+
+  const plasticRed = new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.45, metalness: 0.08 });
+  const plasticBlue = new THREE.MeshStandardMaterial({ color: 0x2980b9, roughness: 0.45, metalness: 0.08 });
+  const plasticGreen = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 0.45, metalness: 0.08 });
+  const liquidCola = new THREE.MeshStandardMaterial({ color: 0x3e1f14, roughness: 0.25, metalness: 0.05 });
+  const liquidOrange = new THREE.MeshStandardMaterial({ color: 0xe67e22, roughness: 0.3, metalness: 0.04 });
+  const coasterMat = new THREE.MeshStandardMaterial({ color: 0xd4c4a8, roughness: 0.9, metalness: 0.02 });
+  const bowlMat = new THREE.MeshStandardMaterial({ color: 0x8b6914, roughness: 0.7, metalness: 0.15 });
+  const chipMat = new THREE.MeshStandardMaterial({ color: 0xe8c878, roughness: 0.85, metalness: 0.02 });
+  const bottleBody = new THREE.MeshStandardMaterial({ color: 0x1a5c2e, roughness: 0.35, metalness: 0.12, transparent: true, opacity: 0.92 });
+  const bottleLabel = new THREE.MeshStandardMaterial({ color: 0xf5f0e6, roughness: 0.7, metalness: 0.05 });
+  const bottleCap = new THREE.MeshStandardMaterial({ color: 0xe74c3c, roughness: 0.4, metalness: 0.2 });
+  const bottleCola = new THREE.MeshStandardMaterial({ color: 0x2a120c, roughness: 0.2, metalness: 0.05 });
+
+  // Copos colossais — legíveis mesmo com a câmera afastada
+  function placeCup(x, z, bodyMat, liquidMat, scale) {
+    const s = (scale || 1) * 3.6;
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.12 * s, 0.1 * s, 0.3 * s, 14), bodyMat);
+    body.position.y = 0.15 * s;
+    g.add(body);
+    const liquid = new THREE.Mesh(new THREE.CylinderGeometry(0.1 * s, 0.1 * s, 0.09 * s, 12), liquidMat);
+    liquid.position.y = 0.22 * s;
+    g.add(liquid);
+    const coaster = new THREE.Mesh(new THREE.CylinderGeometry(0.16 * s, 0.16 * s, 0.016 * s, 16), coasterMat);
+    coaster.position.y = 0.008 * s;
+    g.add(coaster);
+    g.position.set(x, surfaceY, z);
+    g.rotation.y = Math.random() * Math.PI * 2;
+    scene.add(g);
+  }
+
+  function placeSnackBowl(x, z, scale) {
+    const s = scale || 1;
+    const g = new THREE.Group();
+    const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.16 * s, 0.12 * s, 0.08 * s, 14), bowlMat);
+    bowl.position.y = 0.04 * s;
+    g.add(bowl);
+    for (let i = 0; i < 7; i++) {
+      const chip = new THREE.Mesh(new THREE.BoxGeometry(0.045 * s, 0.009 * s, 0.035 * s), chipMat);
+      const a = (i / 7) * Math.PI * 2;
+      chip.position.set(Math.cos(a) * 0.055 * s, 0.07 * s, Math.sin(a) * 0.055 * s);
+      chip.rotation.y = a;
+      chip.rotation.z = (Math.random() - 0.5) * 0.4;
+      g.add(chip);
+    }
+    g.position.set(x, surfaceY, z);
+    scene.add(g);
+  }
+
+  /** Garrafa PET 2L — escala grande (proporcional aos copos colossais) */
+  function placeSodaBottle2L(x, z) {
+    const s = 2.4;
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.14 * s, 0.15 * s, 0.55 * s, 16), bottleBody);
+    body.position.y = 0.28 * s;
+    g.add(body);
+    const shoulder = new THREE.Mesh(new THREE.CylinderGeometry(0.07 * s, 0.14 * s, 0.12 * s, 14), bottleBody);
+    shoulder.position.y = 0.61 * s;
+    g.add(shoulder);
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.045 * s, 0.055 * s, 0.1 * s, 12), bottleBody);
+    neck.position.y = 0.72 * s;
+    g.add(neck);
+    const liquid = new THREE.Mesh(new THREE.CylinderGeometry(0.125 * s, 0.135 * s, 0.42 * s, 14), bottleCola);
+    liquid.position.y = 0.24 * s;
+    g.add(liquid);
+    const label = new THREE.Mesh(new THREE.CylinderGeometry(0.152 * s, 0.152 * s, 0.16 * s, 16), bottleLabel);
+    label.position.y = 0.32 * s;
+    g.add(label);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.05 * s, 0.05 * s, 0.035 * s, 12), bottleCap);
+    cap.position.y = 0.79 * s;
+    g.add(cap);
+    g.position.set(x, surfaceY, z);
+    g.rotation.y = Math.random() * 0.5;
+    scene.add(g);
+  }
+
+  /** Cubo mágico clássico 3×3 (cores nas faces) */
+  function placeRubiksCube(x, z, size) {
+    const s = size || 0.28;
+    const colors = [0xc41e3a, 0xff5800, 0xffd500, 0x009b48, 0x0051ba, 0xffffff]; // R O Y G B W
+    const g = new THREE.Group();
+    const cell = s / 3;
+    const gap = cell * 0.06;
+    const stick = cell - gap;
+    const faceDirs = [
+      [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]
+    ];
+    faceDirs.forEach((dir, fi) => {
+      const mat = new THREE.MeshStandardMaterial({ color: colors[fi], roughness: 0.45, metalness: 0.08 });
+      for (let u = -1; u <= 1; u++) {
+        for (let v = -1; v <= 1; v++) {
+          const sticker = new THREE.Mesh(new THREE.BoxGeometry(stick, stick, 0.012), mat);
+          const px = dir[0] * (s * 0.5) + dir[1] * u * cell + dir[2] * v * cell;
+          const py = dir[1] * (s * 0.5) + dir[0] * u * cell + dir[2] * v * cell;
+          const pz = dir[2] * (s * 0.5) + dir[0] * v * cell + dir[1] * u * cell;
+          // Orientar adesivo na face
+          if (dir[0] !== 0) {
+            sticker.rotation.y = Math.PI / 2;
+            sticker.position.set(dir[0] * (s * 0.5 + 0.004), u * cell, v * cell);
+          } else if (dir[1] !== 0) {
+            sticker.rotation.x = Math.PI / 2;
+            sticker.position.set(u * cell, dir[1] * (s * 0.5 + 0.004), v * cell);
+          } else {
+            sticker.position.set(u * cell, v * cell, dir[2] * (s * 0.5 + 0.004));
+          }
+          g.add(sticker);
+        }
+      }
+    });
+    // Núcleo preto
+    const core = new THREE.Mesh(
+      new THREE.BoxGeometry(s * 0.92, s * 0.92, s * 0.92),
+      new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.7, metalness: 0.1 })
+    );
+    g.add(core);
+    g.position.set(x, surfaceY + s * 0.5, z);
+    g.rotation.y = 0.35;
+    g.rotation.x = 0.08;
+    scene.add(g);
+  }
+
+  // Exatamente 6 copos grandes nas margens
+  const cups = [
+    [halfBoardW + marginX * 0.48, halfBoardD * 0.55, plasticRed, liquidCola, 1],
+    [halfBoardW + marginX * 0.52, -halfBoardD * 0.4, plasticBlue, liquidOrange, 1],
+    [-(halfBoardW + marginX * 0.5), halfBoardD * 0.3, plasticGreen, liquidCola, 1],
+    [-(halfBoardW + marginX * 0.45), -halfBoardD * 0.55, plasticRed, liquidOrange, 1],
+    [halfBoardW * 0.3, halfBoardD + marginZ * 0.52, plasticBlue, liquidCola, 1],
+    [-halfBoardW * 0.35, -(halfBoardD + marginZ * 0.52), plasticGreen, liquidOrange, 1],
+  ];
+  cups.forEach(([x, z, bm, lm, sc]) => placeCup(x, z, bm, lm, sc));
+
+  // Garrafa 2L num canto da mesa (clima de mesa brasileira)
+  placeSodaBottle2L(
+    halfBoardW + marginX * 0.55,
+    halfBoardD + marginZ * 0.45
+  );
+
+  // Cubo mágico bem grande
+  placeRubiksCube(
+    -(halfBoardW + marginX * 0.5),
+    halfBoardD + marginZ * 0.35,
+    0.72
+  );
+
+  placeSnackBowl(halfBoardW + marginX * 0.42, halfBoardD * 0.05, 1.15);
+  placeSnackBowl(-(halfBoardW + marginX * 0.45), -halfBoardD * 0.15, 1.05);
 }
 
 // "Tabuleiro em Branco" — placa maior, branca, fosca e neutra ao redor
@@ -1394,20 +1677,22 @@ function createBoardBase() {
   const outerW = BOARD_OUTER_W;
   const outerD = BOARD_OUTER_D;
 
+  // Placa-base: Standard (mais barato que Physical). Face de baixo é
+  // cullada — câmera não passa sob o tabuleiro.
   const baseGeo = new THREE.BoxGeometry(outerW, BOARD_THICKNESS, outerD);
-  const baseMat = new THREE.MeshPhysicalMaterial(BOARD_WHITE_MAT_OPTS);
+  const baseMat = new THREE.MeshStandardMaterial({
+    color: BOARD_WHITE_MAT_OPTS.color,
+    roughness: BOARD_WHITE_MAT_OPTS.roughness,
+    metalness: BOARD_WHITE_MAT_OPTS.metalness
+  });
   const base = new THREE.Mesh(baseGeo, baseMat);
   base.position.y = TABLE_Y + BOARD_THICKNESS / 2;
   base.receiveShadow = true;
   base.castShadow = true;
   boardGroup.add(base);
 
-  const innerGeo = new THREE.BoxGeometry(outerW - 0.14, 0.02, outerD - 0.14);
-  const innerMat = new THREE.MeshPhysicalMaterial(BOARD_WHITE_MAT_OPTS);
-  const inner = new THREE.Mesh(innerGeo, innerMat);
-  inner.position.y = TABLE_Y + BOARD_THICKNESS + 0.011;
-  inner.receiveShadow = true;
-  boardGroup.add(inner);
+  // Camada interna fina removida: o terreno 3D já cobre o centro e a
+  // face superior da base basta nas margens — menos um draw call.
 }
 
 /* ======================================================================
@@ -2158,53 +2443,19 @@ function buildRiverMesh(cuts) {
   river.updateMatrix();
   worldTerrainGroup.add(river);
 
-  // Fundo do rio — mesma cor da superfície, só no perímetro da fita d'água.
-  // Evita “vazamento” de terreno marrom/verde quando a câmera vê por baixo.
-  const bottomPositions = positions.slice();
-  for (let i = 1; i < bottomPositions.length; i += 3) {
-    bottomPositions[i] -= 0.018; // ligeiramente abaixo da superfície
-  }
-  const bottomIndices = [];
-  for (let i = 0; i < N; i++) {
-    const a = i * 2, b = i * 2 + 1, c2 = (i + 1) * 2, d = (i + 1) * 2 + 1;
-    // Ordem invertida para normal apontar para baixo (visível por baixo)
-    bottomIndices.push(a, b, c2, b, d, c2);
-  }
-  const bottomGeo = new THREE.BufferGeometry();
-  bottomGeo.setAttribute('position', new THREE.Float32BufferAttribute(bottomPositions, 3));
-  bottomGeo.setIndex(bottomIndices);
-  bottomGeo.computeVertexNormals();
-  const waterBottomMat = new THREE.MeshBasicMaterial({
-    color: WATER_COLOR,
-    transparent: false,
-    opacity: 1,
-    side: THREE.DoubleSide,
-    depthWrite: true,
-  });
-  const riverBottom = new THREE.Mesh(bottomGeo, waterBottomMat);
-  riverBottom.name = 'riverWaterBottom';
-  riverBottom.renderOrder = -1;
-  riverBottom.position.y += 0.012;
-  worldTerrainGroup.add(riverBottom);
+  // Fundo do rio / poça REMOVIDOS: câmera não desce sob a água e a
+  // superfície MeshBasic já cobre o canal — economiza malha e draw calls.
 
-  // Pequena poça na foz do rio (fim do canal — sem oceano)
+  // Pequena poça na foz do rio (só a face de cima)
   const mouthIdx = path.length - 1;
   const mouth = path[mouthIdx];
   const mouthY = levelY[mouthIdx] + 0.002;
-  const lake = new THREE.Mesh(new THREE.CircleGeometry(0.45, 20), waterMat);
+  const lake = new THREE.Mesh(new THREE.CircleGeometry(0.45, 16), waterMat);
   lake.rotation.x = -Math.PI / 2;
   lake.position.set(mouth.x, mouthY, mouth.z);
-  lake.receiveShadow = true;
+  lake.receiveShadow = false;
+  lake.castShadow = false;
   worldTerrainGroup.add(lake);
-  // Fundo da poça (mesma cor)
-  const lakeBottom = new THREE.Mesh(
-    new THREE.CircleGeometry(0.45, 20),
-    waterBottomMat
-  );
-  lakeBottom.rotation.x = Math.PI / 2; // face para baixo
-  lakeBottom.position.set(mouth.x, mouthY - 0.018, mouth.z);
-  lakeBottom.name = 'riverLakeBottom';
-  worldTerrainGroup.add(lakeBottom);
 }
 
 /**
@@ -2276,64 +2527,60 @@ function addTerrainDecor(cuts, terrainY) {
     worldTerrainGroup.add(group);
   }
 
-  /** Árvore mais realista: tronco + galhos + copa irregular em camadas. */
+  /** Pinheiro: tronco + camadas de cones (silhueta clássica).
+   *  Usado em margens do rio, jardim e períodos — NÃO na Árvore da Vida. */
   function addTree(x, z, scale) {
     if (!canPlace(x, z)) return;
     const s = scale || 1;
     const group = new THREE.Group();
-    const trunkH = (0.16 + Math.random() * 0.06) * s;
-    // Tronco ligeiramente irregular
+    // Tronco reto e estreito (pinheiro)
+    const trunkH = (0.14 + Math.random() * 0.08) * s;
     const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.012 * s, 0.022 * s, trunkH, 7),
+      new THREE.CylinderGeometry(0.014 * s, 0.022 * s, trunkH, 6),
       trunkMat
     );
     trunk.position.y = trunkH / 2;
     trunk.castShadow = true;
     group.add(trunk);
-    // Galhos laterais curtos
-    const branchMat = trunkMat;
-    [-1, 1].forEach((side) => {
-      if (Math.random() < 0.35) return;
-      const br = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.006 * s, 0.01 * s, 0.08 * s, 5),
-        branchMat
+
+    // Tons de verde-pinho (mais escuros / acinzentados que a folha redonda)
+    const pineMats = [
+      new THREE.MeshStandardMaterial({ color: 0x2d5a32, roughness: 0.92, metalness: 0.02, flatShading: true }),
+      new THREE.MeshStandardMaterial({ color: 0x3a6b3e, roughness: 0.9, metalness: 0.02, flatShading: true }),
+      new THREE.MeshStandardMaterial({ color: 0x1f4a28, roughness: 0.93, metalness: 0.02, flatShading: true }),
+    ];
+    const layers = 3 + Math.floor(Math.random() * 2); // 3 ou 4 andares
+    let y = trunkH * 0.55;
+    for (let i = 0; i < layers; i++) {
+      const t = i / Math.max(1, layers - 1); // 0 = base, 1 = topo
+      const radius = (0.11 - t * 0.055) * s * (0.92 + Math.random() * 0.12);
+      const height = (0.12 - t * 0.02) * s * (0.9 + Math.random() * 0.15);
+      const mat = pineMats[i % pineMats.length];
+      const cone = new THREE.Mesh(
+        new THREE.ConeGeometry(radius, height, 7),
+        mat
       );
-      br.position.set(side * 0.03 * s, trunkH * (0.55 + Math.random() * 0.25), 0);
-      br.rotation.z = side * (0.7 + Math.random() * 0.4);
-      group.add(br);
-    });
-    const fol = foliageMats[Math.floor(Math.random() * foliageMats.length)];
-    // Copa: várias esferas irregularmente agrupadas (não cone/bola única)
-    const lobes = 4 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < lobes; i++) {
-      const r = (0.06 + Math.random() * 0.05) * s;
-      const lobe = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 6), fol);
-      const a = (i / lobes) * Math.PI * 2 + Math.random() * 0.5;
-      const rad = (0.02 + Math.random() * 0.04) * s;
-      lobe.position.set(
-        Math.cos(a) * rad,
-        trunkH + (0.05 + Math.random() * 0.1) * s,
-        Math.sin(a) * rad
-      );
-      lobe.scale.set(
-        0.9 + Math.random() * 0.3,
-        0.75 + Math.random() * 0.25,
-        0.9 + Math.random() * 0.3
-      );
-      lobe.castShadow = true;
-      group.add(lobe);
+      cone.position.y = y + height * 0.42;
+      cone.rotation.y = Math.random() * Math.PI * 2;
+      cone.castShadow = true;
+      cone.receiveShadow = true;
+      group.add(cone);
+      // Sobreposição entre camadas (parece galhos densos)
+      y += height * 0.52;
     }
-    // Topo central
-    const top = new THREE.Mesh(
-      new THREE.SphereGeometry(0.07 * s, 8, 6),
-      fol
+    // Ponteiro do topo
+    const tip = new THREE.Mesh(
+      new THREE.ConeGeometry(0.028 * s, 0.08 * s, 6),
+      pineMats[2]
     );
-    top.scale.y = 0.8;
-    top.position.y = trunkH + 0.12 * s;
-    top.castShadow = true;
-    group.add(top);
+    tip.position.y = y + 0.03 * s;
+    tip.castShadow = true;
+    group.add(tip);
+
     group.position.set(x, groundY(x, z), z);
     group.rotation.y = Math.random() * Math.PI * 2;
+    // leve variação de inclinação natural
+    group.rotation.z = (Math.random() - 0.5) * 0.08;
     worldTerrainGroup.add(group);
   }
 
@@ -2799,63 +3046,122 @@ function addTerrainDecor(cuts, terrainY) {
    * Tronco mais grosso (dois segmentos levemente deslocados = leve torção),
    * copa ampla em várias camadas e "frutos" dourados discretos e emissivos.
    * É o marco visual do período, não uma árvore comum. */
+  /** Árvore da Vida — marco do Éden (Período I).
+   *  Tronco reto e natural, copa ampla em camadas orgânicas (não pinheiro),
+   *  frutos dourados discretos e brilho quente suave. */
   function createTreeOfLife(x, z) {
     if (!canPlace(x, z)) return;
     const group = new THREE.Group();
-    const trunkMatTOL = new THREE.MeshStandardMaterial({ color: 0x4a3626, roughness: 0.9, metalness: 0.03 });
-    const trunkH = 0.62;
-    const trunkLower = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.1, trunkH * 0.55, 9), trunkMatTOL);
-    trunkLower.position.y = trunkH * 0.275;
-    trunkLower.castShadow = true;
-    group.add(trunkLower);
-    const trunkUpper = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.075, trunkH * 0.45, 9), trunkMatTOL);
-    trunkUpper.position.set(0.03, trunkH * 0.55 + trunkH * 0.225, 0.02);
-    trunkUpper.castShadow = true;
-    group.add(trunkUpper);
 
-    const canopyMats = [
-      new THREE.MeshStandardMaterial({ color: 0x3f7a44, roughness: 0.8, metalness: 0.02, flatShading: true }),
-      new THREE.MeshStandardMaterial({ color: 0x5a9a52, roughness: 0.8, metalness: 0.02, flatShading: true }),
-      new THREE.MeshStandardMaterial({ color: 0x2f6a3a, roughness: 0.8, metalness: 0.02, flatShading: true })
-    ];
-    const canopyCenters = [
-      [0, trunkH + 0.16, 0, 0.34],
-      [0.16, trunkH + 0.28, 0.1, 0.24],
-      [-0.18, trunkH + 0.24, -0.12, 0.22],
-      [0.05, trunkH + 0.4, -0.08, 0.18]
-    ];
-    canopyCenters.forEach(([cx, cy, cz, r], i) => {
-      // Cada "lobo" da copa vira um pequeno agrupamento irregular
-      for (let k = 0; k < 3; k++) {
-        const mesh = new THREE.Mesh(
-          new THREE.SphereGeometry(r * (0.55 + Math.random() * 0.35), 8, 6),
-          canopyMats[i % canopyMats.length]
+    // —— Tronco reto, levemente cônico (sem deslocamento torto) ——
+    const trunkMatTOL = new THREE.MeshStandardMaterial({
+      color: 0x5c4030, roughness: 0.92, metalness: 0.02, flatShading: true
+    });
+    const barkDark = new THREE.MeshStandardMaterial({
+      color: 0x3e2a1e, roughness: 0.95, metalness: 0.02, flatShading: true
+    });
+    const trunkH = 0.58;
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.042, 0.078, trunkH, 10),
+      trunkMatTOL
+    );
+    trunk.position.y = trunkH / 2;
+    trunk.castShadow = true;
+    trunk.receiveShadow = true;
+    group.add(trunk);
+    // Anéis de casca discretos (volume natural, sem tortuosidade)
+    for (let i = 0; i < 3; i++) {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.055 - i * 0.006, 0.008, 6, 12),
+        barkDark
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = trunkH * (0.22 + i * 0.22);
+      ring.scale.y = 0.55;
+      group.add(ring);
+    }
+    // Galhos primários curtos e abertos (estrutura da copa)
+    const branchYs = [trunkH * 0.62, trunkH * 0.78, trunkH * 0.9];
+    const branchLens = [0.14, 0.12, 0.09];
+    branchYs.forEach((by, bi) => {
+      const n = 4 + (bi % 2);
+      for (let k = 0; k < n; k++) {
+        const ang = (k / n) * Math.PI * 2 + bi * 0.35;
+        const len = branchLens[bi];
+        const br = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.008, 0.014, len, 6),
+          trunkMatTOL
         );
-        mesh.scale.set(0.9 + Math.random() * 0.25, 0.7 + Math.random() * 0.2, 0.9 + Math.random() * 0.25);
-        mesh.position.set(
-          cx + (Math.random() - 0.5) * r * 0.5,
-          cy + (Math.random() - 0.5) * r * 0.3,
-          cz + (Math.random() - 0.5) * r * 0.5
+        br.position.set(
+          Math.cos(ang) * len * 0.45,
+          by,
+          Math.sin(ang) * len * 0.45
         );
-        mesh.castShadow = true;
-        group.add(mesh);
+        br.rotation.z = Math.cos(ang) * 1.05;
+        br.rotation.x = Math.sin(ang) * 1.05;
+        br.castShadow = true;
+        group.add(br);
       }
     });
 
-    // Frutos dourados discretos — o toque "da Vida", sem exagerar.
-    const fruitMat = new THREE.MeshStandardMaterial({ color: 0xd9b25a, emissive: 0xc9a35b, emissiveIntensity: 0.5, roughness: 0.35, metalness: 0.4 });
-    for (let i = 0; i < 10; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const r = 0.14 + Math.random() * 0.22;
-      const fy = trunkH + 0.14 + Math.random() * 0.32;
-      const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 6), fruitMat);
+    // —— Copa: elipsóides achatados em camadas (árvore de sombra / vida) ——
+    const canopyMats = [
+      new THREE.MeshStandardMaterial({ color: 0x3d8a48, roughness: 0.88, metalness: 0.02, flatShading: true }),
+      new THREE.MeshStandardMaterial({ color: 0x52a85a, roughness: 0.86, metalness: 0.02, flatShading: true }),
+      new THREE.MeshStandardMaterial({ color: 0x2f6e3a, roughness: 0.9, metalness: 0.02, flatShading: true }),
+      new THREE.MeshStandardMaterial({ color: 0x6ab86a, roughness: 0.85, metalness: 0.02, flatShading: true })
+    ];
+    const layers = [
+      { y: trunkH + 0.08, r: 0.32, h: 0.14, n: 7 },
+      { y: trunkH + 0.2,  r: 0.26, h: 0.13, n: 6 },
+      { y: trunkH + 0.32, r: 0.18, h: 0.12, n: 5 },
+      { y: trunkH + 0.42, r: 0.11, h: 0.1,  n: 4 }
+    ];
+    layers.forEach((layer, li) => {
+      for (let i = 0; i < layer.n; i++) {
+        const a = (i / layer.n) * Math.PI * 2 + li * 0.4;
+        const dist = layer.r * (0.35 + (i % 3) * 0.18);
+        const mesh = new THREE.Mesh(
+          new THREE.SphereGeometry(layer.h * (0.85 + (i % 3) * 0.12), 9, 7),
+          canopyMats[(li + i) % canopyMats.length]
+        );
+        mesh.scale.set(1.35 + (i % 2) * 0.2, 0.55 + (i % 3) * 0.08, 1.3 + (i % 2) * 0.15);
+        mesh.position.set(
+          Math.cos(a) * dist,
+          layer.y + ((i % 2) - 0.5) * 0.04,
+          Math.sin(a) * dist
+        );
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
+      }
+      const core = new THREE.Mesh(
+        new THREE.SphereGeometry(layer.r * 0.55, 9, 7),
+        canopyMats[li % canopyMats.length]
+      );
+      core.scale.set(1.1, 0.5, 1.1);
+      core.position.y = layer.y;
+      core.castShadow = true;
+      group.add(core);
+    });
+
+    // Frutos dourados discretos nas bordas da copa
+    const fruitMat = new THREE.MeshStandardMaterial({
+      color: 0xe8c56a, emissive: 0xc9a35b, emissiveIntensity: 0.45,
+      roughness: 0.4, metalness: 0.35
+    });
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2 + 0.2;
+      const r = 0.12 + (i % 4) * 0.04;
+      const fy = trunkH + 0.12 + (i % 5) * 0.07;
+      const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.016, 7, 6), fruitMat);
       fruit.position.set(Math.cos(angle) * r, fy, Math.sin(angle) * r);
       group.add(fruit);
     }
 
-    // Luz suave e quente própria da árvore — reforça que é o marco do Éden.
-    const glow = new THREE.PointLight(0xffda8a, 0.35, 1.6, 2);
-    glow.position.set(0, trunkH + 0.25, 0);
+    // Brilho quente suave — marco do Éden
+    const glow = new THREE.PointLight(0xffda8a, 0.28, 1.5, 2);
+    glow.position.set(0, trunkH + 0.22, 0);
     group.add(glow);
 
     group.position.set(x, groundY(x, z), z);
@@ -5187,10 +5493,29 @@ function animateAlongPath(player, path, idx, onDone) {
   const from = player.mesh.position.clone();
   const target = boardSpaces[path[idx]].position;
   const to = new THREE.Vector3(target.x, target.y + SPACE_HEIGHT / 2, target.z);
+  // No modo Seguir, a câmera só acompanha o peão atualmente selecionado.
+  // Isso é essencial para a opção "Seguir meu peão": movimentos de outros
+  // jogadores não podem assumir o controle da câmera.
+  const shouldFollowThisPlayer =
+    typeof cameraMode !== 'undefined' &&
+    cameraMode === 'follow' &&
+    typeof getFollowPlayerIndex === 'function' &&
+    players.indexOf(player) === getFollowPlayerIndex();
+
+  if (shouldFollowThisPlayer) {
+    focusOnSpace(path[idx], { follow: true });
+  }
   tween(240, (p) => {
     player.mesh.position.x = THREE.MathUtils.lerp(from.x, to.x, p);
     player.mesh.position.z = THREE.MathUtils.lerp(from.z, to.z, p);
     player.mesh.position.y = THREE.MathUtils.lerp(from.y, to.y, p) + Math.sin(p * Math.PI) * 0.1;
+    if (shouldFollowThisPlayer && player.mesh) {
+      controls.target.lerp(
+        new THREE.Vector3(player.mesh.position.x, 0.3, player.mesh.position.z),
+        0.12
+      );
+      if (typeof requestRender === 'function') requestRender();
+    }
   }, () => {
     player.currentSpace = path[idx];
     animateAlongPath(player, path, idx + 1, onDone);
@@ -5214,6 +5539,10 @@ const CAMERA_SAFE_MIN_DIST   = boardDiag * 0.22;
 const CAMERA_LERP_FACTOR = 0.045;
 let cameraGoal = null;
 
+// Modo Seguir: conserva somente a distância escolhida pelo usuário no zoom.
+// O ângulo/posição relativa ao peão continua sendo recalculado normalmente.
+let followCameraDistance = null;
+
 function focusTo(posVec, targetVec) {
   cameraGoal = { pos: posVec.clone(), target: targetVec.clone() };
   if (typeof requestRender === 'function') requestRender();
@@ -5230,23 +5559,168 @@ function updateCameraGoal() {
 function focusOnBoard() { focusTo(DEFAULT_CAM_POS.clone(), DEFAULT_TARGET.clone()); }
 function focusOnCenter() { focusTo(new THREE.Vector3(0, boardDiag * 0.5, boardDiag * 0.55), new THREE.Vector3(0, 0.4, 0)); }
 function focusOnDice() { focusOnCenter(); }
-function focusOnSpace(n) {
+function focusOnSpace(n, opts) {
   const s = boardSpaces[n];
   if (!s) return;
   const dir = new THREE.Vector3(s.position.x, 0, s.position.z);
   if (dir.lengthSq() < 0.0001) dir.set(0, 0, 1); else dir.normalize();
-  const dist = Math.max(1.7, CAMERA_SAFE_MIN_DIST);
-  const height = Math.max(1.6, CAMERA_SAFE_MIN_HEIGHT);
+  // Modo seguir: um pouco mais afastado (padrão confortável; zoom ainda livre)
+  const followPad = (opts && opts.follow) || (typeof cameraMode !== 'undefined' && cameraMode === 'follow');
+  const distMul = followPad ? 1.55 : 1;
+  const heightMul = followPad ? 1.4 : 1;
+  const defaultDist = Math.max(1.7, CAMERA_SAFE_MIN_DIST) * distMul;
+  const defaultHeight = Math.max(1.6, CAMERA_SAFE_MIN_HEIGHT) * heightMul;
+  const target = new THREE.Vector3(s.position.x, 0.3, s.position.z);
+
+  // No modo Seguir, reaplica somente a distância escolhida pelo usuário;
+  // o ângulo volta para a posição natural de acompanhamento.
+  let dist = defaultDist;
+  let height = defaultHeight;
+  if (followPad && followCameraDistance !== null) {
+    const defaultVertical = defaultHeight - 0.3;
+    const defaultSpherical = Math.hypot(defaultDist, defaultVertical);
+    const scale = followCameraDistance / Math.max(0.0001, defaultSpherical);
+    dist = defaultDist * scale;
+    height = 0.3 + defaultVertical * scale;
+  }
+
   const camPos = new THREE.Vector3(s.position.x + dir.x * dist, height, s.position.z + dir.z * dist);
-  focusTo(camPos, new THREE.Vector3(s.position.x, 0.3, s.position.z));
+  focusTo(camPos, target);
 }
 function focusOnPlayer(idx) {
   const p = players[idx];
   if (!p) return;
-  focusOnSpace(p.currentSpace);
+  focusOnSpace(p.currentSpace, { follow: typeof cameraMode !== 'undefined' && cameraMode === 'follow' });
 }
-// Exposto globalmente para permitir expansão futura (ex.: acompanhar peão em movimento)
-window.JORNADA_CAMERA = { focusOnBoard, focusOnCenter, focusOnDice, focusOnSpace, focusOnPlayer };
+
+/** free = livre | home = travada na visão inicial | follow = segue peão selecionado */
+let cameraMode = 'free';
+let followTargetMode = 'all'; // 'all' = jogador da vez | 'mine' = meu peão
+
+function getMyCameraPlayerIndex() {
+  if (typeof IS_OBSERVER !== 'undefined' && IS_OBSERVER) return -1;
+  if (typeof MULTIPLAYER_ONLINE !== 'undefined' && MULTIPLAYER_ONLINE && MY_TURN_SLOT) {
+    const idx = parseInt(MY_TURN_SLOT, 10) - 1;
+    return Number.isInteger(idx) && players[idx] ? idx : -1;
+  }
+  // No modo local, P1 é o jogador do usuário.
+  return players[0] ? 0 : -1;
+}
+
+function getFollowPlayerIndex() {
+  if (followTargetMode === 'mine') return getMyCameraPlayerIndex();
+  return (typeof currentPlayerIdx === 'number') ? currentPlayerIdx : -1;
+}
+
+function updateFollowCameraUi() {
+  const wrap = document.getElementById('camFollowOptions');
+  const allBtn = document.getElementById('camFollowAll');
+  const mineBtn = document.getElementById('camFollowMine');
+  if (wrap) wrap.style.display = cameraMode === 'follow' ? 'flex' : 'none';
+  if (allBtn) allBtn.classList.toggle('active', cameraMode === 'follow' && followTargetMode === 'all');
+  if (mineBtn) mineBtn.classList.toggle('active', cameraMode === 'follow' && followTargetMode === 'mine');
+}
+
+
+function updateCameraModeUi() {
+  const homeBtn = document.getElementById('camOptHome');
+  const followBtn = document.getElementById('camOptFollow');
+  if (homeBtn) homeBtn.classList.toggle('active', cameraMode === 'home');
+  if (followBtn) followBtn.classList.toggle('active', cameraMode === 'follow');
+  updateFollowCameraUi();
+}
+
+function setCameraMode(mode) {
+  if (mode !== 'free' && mode !== 'home' && mode !== 'follow') return;
+  const prev = cameraMode;
+  // Toggle: clicar de novo no ativo volta para livre
+  if (mode === cameraMode) {
+    cameraMode = 'free';
+  } else {
+    cameraMode = mode;
+  }
+  updateCameraModeUi();
+
+  // Ao sair do Home: PARA qualquer retorno automático e trava onde está
+  if (prev === 'home' && cameraMode !== 'home') {
+    cameraGoal = null;
+  }
+
+  if (cameraMode === 'home') {
+    focusOnBoard();
+  } else if (cameraMode === 'follow') {
+    const followIdx = getFollowPlayerIndex();
+    if (followIdx >= 0) focusOnPlayer(followIdx);
+  } else {
+    // Livre: não força posição — só garante que não há lerp residual
+    cameraGoal = null;
+  }
+  if (typeof requestRender === 'function') requestRender();
+}
+
+function initCameraModeUi() {
+  const btn = document.getElementById('cameraModeBtn');
+  const panel = document.getElementById('cameraModePanel');
+  const wrap = document.getElementById('cameraModeWrap');
+  const closeBtn = document.getElementById('cameraModeClose');
+  if (!btn || !panel) return;
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    panel.classList.toggle('open');
+  });
+  if (closeBtn) {
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      panel.classList.remove('open');
+    });
+  }
+  panel.querySelectorAll('button.camOpt[data-cam-mode]').forEach((b) => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const mode = b.getAttribute('data-cam-mode');
+      if (mode === 'follow') {
+        // Primeiro clique em "Seguir peão" apenas abre as duas opções.
+        if (cameraMode !== 'follow') setCameraMode('follow');
+        updateFollowCameraUi();
+        return;
+      }
+      setCameraMode(mode);
+    });
+  });
+
+  panel.querySelectorAll('button.camOpt[data-follow-target]').forEach((b) => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      followTargetMode = b.getAttribute('data-follow-target') === 'mine' ? 'mine' : 'all';
+      if (cameraMode !== 'follow') cameraMode = 'follow';
+      updateCameraModeUi();
+      const followIdx = getFollowPlayerIndex();
+      if (followIdx >= 0) focusOnPlayer(followIdx);
+      updateFollowCameraUi();
+      if (typeof requestRender === 'function') requestRender();
+    });
+  });
+  document.addEventListener('click', (e) => {
+    if (wrap && !wrap.contains(e.target)) panel.classList.remove('open');
+  });
+  // Visão inicial (só com Home ATIVO): soltar o dedo → volta lentamente ao home
+  // Livre / Seguir: não chama focusOnBoard — a câmera fica onde o usuário deixou
+  if (typeof controls !== 'undefined' && controls) {
+    controls.addEventListener('end', () => {
+      if (cameraMode === 'home') {
+        focusOnBoard();
+      }
+    });
+  }
+  updateCameraModeUi();
+  updateFollowCameraUi();
+}
+
+window.JORNADA_CAMERA = {
+  focusOnBoard, focusOnCenter, focusOnDice, focusOnSpace, focusOnPlayer,
+  setCameraMode, getMode: () => cameraMode
+};
 
 
 /* ======================================================================
@@ -5337,6 +5811,13 @@ controls.addEventListener('start', () => {
 });
 controls.addEventListener('end', () => {
   cameraInteracting = false;
+
+  // No modo Seguir, registra somente a distância final escolhida pelo usuário.
+  // Arrastar a câmera pode mudar o ângulo, mas não altera esta distância.
+  if (typeof cameraMode !== 'undefined' && cameraMode === 'follow') {
+    followCameraDistance = camera.position.distanceTo(controls.target);
+  }
+
   // ~0.5–0.7s de frames para o damping terminar com suavidade
   dampingFramesLeft = 42;
   requestRender();
@@ -5349,6 +5830,13 @@ requestRender();
 window.JORNADA_REQUEST_RENDER = requestRender;
 window.triggerAnimationLoop = requestRender;
 
+// UI do seletor de câmera (após DOM e controls prontos)
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initCameraModeUi);
+} else {
+  initCameraModeUi();
+}
+
 
 /* ======================================================================
    10. INTERAÇÃO — botão de dados, turnos e reinício
@@ -5360,8 +5848,7 @@ const playerLabel = document.getElementById('playerLabel');
 const galardoesAmountEl = document.getElementById('galardoesAmount');
 const playersPanelEl = document.getElementById('playersPanel');
 const galardaoToastEl = document.getElementById('galardaoToast');
-const resetViewBtn = document.getElementById('resetViewBtn');
-const resetGameBtn = document.getElementById('resetGameBtn');
+// Câmera: #cameraModeBtn / #cameraModePanel (Livre implícito / Home / Seguir)
 
 let currentPlayerIdx = 0;
 let rolling = false;
@@ -5494,6 +5981,10 @@ function nextActivePlayer() {
   const activeIdxs = players.map((_, i) => i).filter(i => players[i].active);
   const pos = activeIdxs.indexOf(currentPlayerIdx);
   currentPlayerIdx = activeIdxs[(pos + 1) % activeIdxs.length];
+  if (typeof cameraMode !== 'undefined' && cameraMode === 'follow') {
+    const followIdx = getFollowPlayerIndex();
+    if (followIdx >= 0) focusOnPlayer(followIdx);
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -6091,26 +6582,7 @@ rollBtn.addEventListener('click', () => {
   beginCurrentPlayerTurn();
 });
 
-resetViewBtn.addEventListener('click', () => focusOnBoard());
-
-resetGameBtn.addEventListener('click', () => {
-  if (gameState.phase !== 'playing') return;
-  // Online: reinício local só com confirmação implícita do fluxo de mesa;
-  // não depende mais de Host. Evita reset acidental em partida compartilhada.
-  if (typeof MULTIPLAYER_ONLINE !== 'undefined' && MULTIPLAYER_ONLINE) {
-    showGalardaoToast('Reinício online desativado — a partida persiste na mesa.');
-    return;
-  }
-  currentPlayerIdx = 0;
-  hideAllTableScreens();
-  hideActionPanel();
-  eventScreenEl.classList.add('hidden');
-  activatePlayers(players.filter(p => p.active).length || GAME_RULES.minPlayers);
-  diceResultEl.textContent = 'Aguardando lançamento…';
-  rollBtn.disabled = false;
-  updatePlayerHud();
-  focusOnBoard();
-});
+// Botão ⌂ antigo virou 📷 com painel (Home / Seguir peão).
 
 
 /* ======================================================================
@@ -6157,7 +6629,7 @@ const confirmEndScreen  = el('confirmEndScreen');
 const confirmHomeScreen = el('confirmHomeScreen');
 const menuPanel         = el('menuPanel');
 const mainHud           = el('mainHud');
-const topRightEls       = [el('menuBtn'), el('resetViewBtn'), el('resetGameBtn')];
+const topRightEls       = [el('menuBtn'), el('cameraModeWrap')];
 
 // Elementos da lista de mesas (somente ONLINE)
 const tableGridEl        = el('tableGrid');
