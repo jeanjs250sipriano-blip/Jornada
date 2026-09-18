@@ -7134,27 +7134,37 @@ const FirebaseTableStore = (() => {
     onChange(cb) {
       changeCbs.push(cb);
       (async () => {
-        const db = await ensureFirebase().catch(() => null);
-        if (!db) return;
-        const { ref, onValue } = firebaseDb._api;
-        if (!unsubscribeTablesRef) {
-          unsubscribeTablesRef = onValue(
-            ref(db, 'tables'),
-            (snap) => {
-              const val = snap.exists() ? snap.val() : {};
-              const tables = {};
-              TABLE_IDS.forEach((id) => { tables[id] = normalizeRemote(val[id], id); });
-              changeCbs.forEach((f) => f(tables));
-            },
-            (err) => {
-              // Sem isso, uma negação de permissão (ex.: regras do
-              // Realtime Database desatualizadas) falhava em silêncio e a
-              // lista de mesas simplesmente nunca atualizava para ninguém.
-              console.error('[JORNADA] ERRO AO SINCRONIZAR (lista de mesas):', err);
-              showGalardaoToast('ERRO AO SINCRONIZAR (lista): ' + (err && (err.code || err.message) || 'erro desconhecido'), 6000);
-            }
-          );
+        const db = await ensureFirebase().catch((e) => {
+          console.error('[JORNADA] ensureFirebase na lista de mesas:', e);
+          return null;
+        });
+        if (!db) {
+          // Notifica o callback com lista vazia para a UI não ficar “travada”
+          try { cb({}); } catch (e) {}
+          return;
         }
+        const { ref, onValue, off } = firebaseDb._api;
+        // Se já havia listener órfão, recria para garantir dados atuais
+        if (unsubscribeTablesRef) {
+          try {
+            if (typeof unsubscribeTablesRef === 'function') unsubscribeTablesRef();
+            else if (off) off(ref(db, 'tables'));
+          } catch (e) {}
+          unsubscribeTablesRef = null;
+        }
+        unsubscribeTablesRef = onValue(
+          ref(db, 'tables'),
+          (snap) => {
+            const val = snap.exists() ? snap.val() : {};
+            const tables = {};
+            TABLE_IDS.forEach((id) => { tables[id] = normalizeRemote(val[id], id); });
+            changeCbs.forEach((f) => { try { f(tables); } catch (e) {} });
+          },
+          (err) => {
+            console.error('[JORNADA] ERRO AO SINCRONIZAR (lista de mesas):', err);
+            showGalardaoToast('ERRO AO SINCRONIZAR (lista): ' + (err && (err.code || err.message) || 'erro desconhecido'), 6000);
+          }
+        );
       })();
       return () => { changeCbs = changeCbs.filter((f) => f !== cb); };
     },
@@ -9216,17 +9226,24 @@ function goToTableListScreen() {
   gameState.tableId = null;
   MULTIPLAYER_ONLINE = false;
   MY_TURN_SLOT = null;
+  IS_OBSERVER = false;
   if (unsubscribeGameState) { unsubscribeGameState(); unsubscribeGameState = null; }
   if (typeof unsubscribeGameEvent !== 'undefined' && unsubscribeGameEvent) {
     unsubscribeGameEvent(); unsubscribeGameEvent = null;
   }
   hideAllTableScreens();
-  tableListScreen.classList.remove('hidden');
-  pauseScreen.classList.add('hidden');
-  menuPanel.classList.add('hidden');
+  if (tableListScreen) tableListScreen.classList.remove('hidden');
+  if (pauseScreen) pauseScreen.classList.add('hidden');
+  if (menuPanel) menuPanel.classList.add('hidden');
   showGameChrome(false);
+  // Prepara Firebase em paralelo (Auth anônimo + RTDB) e assina a lista
+  ensureFirebase().then((db) => {
+    if (!db && gameState.phase === 'tables') {
+      showGalardaoToast('Firebase indisponível — confira Auth anônimo e rede.', 5000);
+    }
+  }).catch(() => {});
   subscribeTables();
-  renderTableList(currentTablesSnapshot);
+  renderTableList(currentTablesSnapshot || {});
 }
 
 /** Modo local: 'AMIGOS' | 'VS_MACHINE' | null (online/outros) */
@@ -9319,13 +9336,33 @@ if (btnPlayVsMachineEl) {
     startLocalVsMachine();
   });
 }
-btnPlayOnlineEl.addEventListener('click', () => {
+btnPlayOnlineEl.addEventListener('click', async () => {
   if (!FIREBASE_CONFIGURED) {
     showGalardaoToast('Configure o Firebase (ver LEIA-ME) para habilitar o modo online.');
     return;
   }
+  // file:// bloqueia módulos do Firebase em vários navegadores
+  if (typeof location !== 'undefined' && location.protocol === 'file:') {
+    showGalardaoToast('Abra o jogo via servidor (http/https). file:// impede o modo online.', 5000);
+    console.warn('[JORNADA] Modo online exige http(s); protocol=', location.protocol);
+  }
   localGameMode = null;
+  showGalardaoToast('Conectando ao online…');
   goToTableListScreen();
+  try {
+    const db = await ensureFirebase();
+    if (!db) {
+      showGalardaoToast('Não conectou ao Firebase. Ative Auth anônimo e internet.', 6000);
+      return;
+    }
+    const tables = await FirebaseTableStore.list();
+    currentTablesSnapshot = tables || {};
+    if (gameState.phase === 'tables') renderTableList(currentTablesSnapshot);
+    showGalardaoToast('Online conectado.', 1800);
+  } catch (err) {
+    console.error('[JORNADA] Falha ao entrar no modo online:', err);
+    showGalardaoToast('Online: ' + ((err && (err.code || err.message)) || 'erro desconhecido'), 6000);
+  }
 });
 document.querySelectorAll('.localCountBtn').forEach((btn) => {
   btn.addEventListener('click', () => {
